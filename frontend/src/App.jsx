@@ -80,7 +80,7 @@ function App() {
 
     socket.on('resolution-decision', async (data) => {
       await useStore.getState().triggerResolve(data.action);
-      if (data.action === 'escalate') {
+      if (data.action === 'escalate' || data.action === 'dispatch-tow') {
         useStore.getState().setActiveTab('mechanics');
       }
     });

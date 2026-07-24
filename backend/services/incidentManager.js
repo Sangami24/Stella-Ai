@@ -19,6 +19,9 @@ class IncidentManager {
       severity: null,
       diagnosis: null,
       callStatus: null,
+      callRecipient: null,
+      activeCallRole: null, // 'engineer', 'mechanic', 'driver'
+      pendingResolution: null, // to track sequential call state
       transcript: [],
       mechanics: null,
       resolution: null,
@@ -154,6 +157,22 @@ class IncidentManager {
     this.incident.callStatus = status;
     this.io.emit('call-status', status);
     this.io.emit('incident', this.incident);
+  }
+
+  setCallRecipient(recipient) {
+    if (!this.incident) return;
+    this.incident.callRecipient = recipient;
+    this.io.emit('incident', this.incident);
+  }
+
+  setActiveCallRole(role) {
+    if (!this.incident) return;
+    this.incident.activeCallRole = role;
+  }
+
+  setPendingResolution(data) {
+    if (!this.incident) return;
+    this.incident.pendingResolution = data;
   }
 
   setMechanics(mechanics) {

@@ -64,7 +64,9 @@ export default function VoicePanel() {
             <div className="grid grid-cols-3 gap-3 mt-4 pt-4 border-t border-dash-border/50">
               <div className="text-center">
                 <div className="text-xs text-dash-muted mb-1">Calling</div>
-                <div className="text-sm font-medium text-dash-text">On-Call Engineer</div>
+                <div className="text-sm font-medium text-dash-text text-center w-full truncate max-w-full">
+                  {incident?.callRecipient || 'Connecting...'}
+                </div>
               </div>
               <div className="text-center">
                 <div className="text-xs text-dash-muted mb-1">Mode</div>

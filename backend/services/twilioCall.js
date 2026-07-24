@@ -20,6 +20,8 @@ class TwilioCallService {
       this.client = twilio(accountSid, authToken);
       this.fromNumber = process.env.TWILIO_FROM_NUMBER;
       this.toNumber = process.env.TWILIO_TO_NUMBER;
+      this.mechanicNumber = process.env.TWILIO_MECHANIC_NUMBER;
+      this.driverNumber = process.env.TWILIO_DRIVER_NUMBER;
       this.webhookBaseUrl = process.env.TWILIO_WEBHOOK_BASE_URL || 'https://your-ngrok-url.ngrok.io';
     }
   }
@@ -35,6 +37,7 @@ class TwilioCallService {
       throw new Error('Twilio not configured');
     }
 
+    this.incidentManager.setCallRecipient('On-Call Engineer');
     this.incidentManager.setCallStatus('ringing');
     this.incidentManager.updateStatus('calling');
 
@@ -61,10 +64,8 @@ class TwilioCallService {
       ? `Hello, this is STLA Guardian AI calling from the Stellantis diagnostic system. ` +
         `We've detected a critical issue: ${diagnosis.rootCause}. ` +
         `Severity level ${diagnosis.severity} out of 5, with ${diagnosis.confidence} percent confidence. ` +
-        `Risk assessment: ${diagnosis.riskAssessment}. ` +
-        `Recommended action: ${diagnosis.recommendedAction}. ` +
-        `Would you like me to proceed with automated resolution, or should we dispatch a field mechanic?`
-      : `Hello, this is STLA Guardian AI. We've detected a vehicle anomaly requiring your attention. Please advise on next steps.`;
+        `I need your expert opinion. What do you think is wrong, and should I dispatch a mobile mechanic, or does this require a tow truck?`
+      : `Hello, this is STLA Guardian AI. We've detected a vehicle anomaly requiring your attention. Please provide your diagnosis and advise if we need a mechanic or a tow truck.`;
 
     response.say({ voice: 'Polly.Matthew' }, message);
 
@@ -113,15 +114,19 @@ class TwilioCallService {
 
     // Check if this is a resolution decision
     const lower = speechResult.toLowerCase();
-    const isAutoFix = lower.includes('fix') || lower.includes('proceed') || lower.includes('approve') || lower.includes('yes') || lower.includes('auto');
-    const isEscalate = lower.includes('mechanic') || lower.includes('escalate') || lower.includes('send') || lower.includes('dispatch') || lower.includes('no');
+    const isTow = lower.includes('tow') || lower.includes('towing') || lower.includes('truck');
+    const isMechanic = lower.includes('mechanic') || lower.includes('dispatch') || lower.includes('send someone');
+    const isAutoFix = lower.includes('fix') || lower.includes('auto');
 
-    if (isAutoFix || isEscalate) {
+    if (isTow || isMechanic || isAutoFix) {
       response.say({ voice: 'Polly.Matthew' }, aiResponse + ' Thank you. I\'ll proceed with this course of action. Goodbye.');
       response.hangup();
 
       // Trigger resolution
-      const action = isAutoFix ? 'auto-fix' : 'escalate';
+      let action = 'escalate'; // mechanic
+      if (isTow) action = 'dispatch-tow';
+      if (isAutoFix) action = 'auto-fix';
+      
       setTimeout(() => {
         this.io.emit('resolution-decision', { action, source: 'call' });
       }, 2000);
@@ -150,6 +155,16 @@ class TwilioCallService {
       this.incidentManager.updateStatus('in_call');
     } else if (status === 'completed') {
       this.incidentManager.setCallStatus('completed');
+      
+      // Safety net for demo: if they hung up without making a decision, auto-resolve
+      const currentIncident = this.incidentManager.getIncident();
+      if (currentIncident && currentIncident.status === 'in_call') {
+        console.log('Call completed without AI triggering resolution. Auto-triggering tow truck dispatch for demo purposes.');
+        this.incidentManager.addTranscriptLine('System', 'Call disconnected. Defaulting to tow truck dispatch.');
+        setTimeout(() => {
+          this.io.emit('resolution-decision', { action: 'dispatch-tow', source: 'auto-fallback' });
+        }, 1000);
+      }
     }
   }
 
@@ -213,12 +228,12 @@ class TwilioCallService {
       );
     } else {
       this.incidentManager.addTranscriptLine('Engineer',
-        `This looks like it needs hands-on inspection. The ${diagnosis?.affectedSystem?.toLowerCase() || 'system'} issue can't be safely resolved remotely. Please dispatch the nearest certified mechanic.`
+        `This looks like it needs hands-on inspection. The ${diagnosis?.affectedSystem?.toLowerCase() || 'system'} issue is severe. Please dispatch a tow truck immediately.`
       );
       await this._delay(2000);
 
       this.incidentManager.addTranscriptLine('AI',
-        `Acknowledged. I'll locate the nearest certified mechanic and calculate an ETA. The vehicle operator will be notified immediately. Thank you.`
+        `Acknowledged. I'll dispatch the nearest tow truck and send them the vehicle's GPS location via WhatsApp. Thank you.`
       );
     }
 
@@ -236,21 +251,85 @@ class TwilioCallService {
       label: 'Call Completed',
       description: isAutoFixable
         ? 'Engineer approved automated resolution'
-        : 'Engineer requested mechanic dispatch',
+        : 'Engineer requested tow truck dispatch',
       timestamp: new Date().toISOString(),
       status: 'completed',
-      color: isAutoFixable ? 'green' : 'yellow'
+      color: isAutoFixable ? 'green' : 'red'
     });
     this.io.emit('incident', this.incidentManager.incident);
 
     await this._delay(1500);
 
     // Phase 9: Trigger resolution
-    const action = isAutoFixable ? 'auto-fix' : 'escalate';
+    const action = isAutoFixable ? 'auto-fix' : 'dispatch-tow';
     this.io.emit('resolution-decision', { action, source: 'simulated-call' });
   }
 
+  /**
+   * Initiate a one-sided dispatch call to a mechanic or tow company.
+   * Tells them the issue and that a WhatsApp has been sent, then hangs up.
+   */
+  async initiateDispatchCall(role, diagnosis) {
+    if (!this.client) {
+      console.log(`[Simulated] Dispatch call to ${role} initiated.`);
+      return;
+    }
+
+    this.incidentManager.setCallRecipient(`Service Provider (${role})`);
+    this.incidentManager.setCallStatus('ringing');
+
+    // Send WhatsApp Map Link
+    try {
+      await this.client.messages.create({
+        body: `🚨 STLA Guardian AI Alert 🚨\nA ${role} is required immediately for a vehicle experiencing: ${diagnosis?.rootCause}.\n\nVehicle Location: https://www.google.com/maps/search/?api=1&query=42.6685,-83.2201`,
+        from: `whatsapp:+14155238886`, // Twilio standard WhatsApp Sandbox number
+        to: `whatsapp:${this.mechanicNumber || this.toNumber}`
+      });
+      console.log('WhatsApp location sent successfully.');
+    } catch (e) {
+      console.error('Failed to send WhatsApp (requires joining sandbox first):', e.message);
+    }
+
+    try {
+      const call = await this.client.calls.create({
+        url: `${this.webhookBaseUrl}/twilio/dispatch-voice?role=${encodeURIComponent(role)}&issue=${encodeURIComponent(diagnosis?.rootCause || 'system failure')}`,
+        to: this.mechanicNumber || this.toNumber, // Use specific mechanic number
+        from: this.fromNumber
+      });
+      console.log(`Dispatched call to ${role}, Call SID: ${call.sid}`);
+      return call;
+    } catch (err) {
+      console.error('Failed to initiate dispatch call:', err.message);
+    }
+  }
+
+  /**
+   * Initiate a one-sided call to the driver to notify them of the dispatch.
+   */
+  async initiateDriverCall(role, diagnosis, eta) {
+    if (!this.client) {
+      console.log(`[Simulated] Driver notification call initiated.`);
+      return;
+    }
+
+    this.incidentManager.setCallRecipient('Vehicle Driver');
+    this.incidentManager.setCallStatus('ringing');
+
+    try {
+      const call = await this.client.calls.create({
+        url: `${this.webhookBaseUrl}/twilio/driver-voice?role=${encodeURIComponent(role)}&issue=${encodeURIComponent(diagnosis?.rootCause || 'system failure')}&eta=${encodeURIComponent(eta)}`,
+        to: this.driverNumber || this.toNumber, // Use specific driver number
+        from: this.fromNumber
+      });
+      console.log(`Driver notification call dispatched, Call SID: ${call.sid}`);
+      return call;
+    } catch (err) {
+      console.error('Failed to initiate driver call:', err.message);
+    }
+  }
+
   _delay(ms) {
+
     return new Promise(resolve => setTimeout(resolve, ms));
   }
 }

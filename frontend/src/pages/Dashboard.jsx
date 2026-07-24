@@ -42,7 +42,10 @@ export default function Dashboard() {
   const incident = useStore((s) => s.incident);
   const diagnosis = useStore((s) => s.diagnosis);
   const activeFault = useStore((s) => s.activeFault);
-  const simulateFault = useStore((s) => s.simulateFault);
+  const simulateFault = async (type) => {
+    await useStore.getState().simulateFault(type);
+    useStore.getState().setActiveTab('voice');
+  };
   const startDemo = useStore((s) => s.startDemo);
   const resetDemo = useStore((s) => s.resetDemo);
   const isDemoRunning = useStore((s) => s.isDemoRunning);

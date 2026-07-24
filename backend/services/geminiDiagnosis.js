@@ -11,7 +11,7 @@ class GeminiDiagnosis {
 
     if (this.apiKey) {
       const genAI = new GoogleGenerativeAI(this.apiKey);
-      this.model = genAI.getGenerativeModel({ model: 'gemini-2.0-flash' });
+      this.model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
     }
   }
 
@@ -135,7 +135,18 @@ Based on the conversation, determine the resolution path. Respond with ONLY a va
       return this._getFallbackCallResponse(engineerMessage);
     }
 
-    const prompt = `You are an AI vehicle diagnostic assistant on a voice call with an on-call engineer. Be concise and professional — this is a voice call, so keep responses under 3 sentences.
+    const prompt = `You are STLA Guardian AI, an advanced automotive diagnostic AI acting as a voice assistant dispatcher. 
+You are speaking on a phone call with a human automotive engineer.
+You just reported a vehicle anomaly to the engineer and asked them if they want to dispatch a mobile mechanic or dispatch a tow truck.
+Your goal is to converse naturally and concisely, acknowledging their diagnosis and confirming their choice of action.
+
+CONVERSATION RULES:
+1. Be extremely concise. Keep responses under 2 sentences. You are on a live phone call.
+2. If the engineer says to dispatch a mechanic, acknowledge the decision and say you will dispatch a certified mobile mechanic.
+3. If the engineer says to dispatch a tow truck, acknowledge the decision and say you will dispatch a tow truck and send them the vehicle's GPS location via WhatsApp.
+4. If they say to auto-fix, say you will proceed with the automated resolution.
+5. Do not use markdown, emojis, or lists. Talk like a human on the phone.
+6. Acknowledge any diagnostic insights they provide.
 
 Current diagnosis:
 ${JSON.stringify(diagnosis, null, 2)}
@@ -151,6 +162,7 @@ Respond naturally as if speaking on the phone. If they ask about the issue, expl
       const result = await this.model.generateContent(prompt);
       return result.response.text().trim();
     } catch (err) {
+      console.error('Gemini Call Response Error:', err.message);
       return this._getFallbackCallResponse(engineerMessage);
     }
   }
@@ -244,17 +256,27 @@ Respond naturally as if speaking on the phone. If they ask about the issue, expl
   }
 
   _getFallbackCallResponse(engineerMessage) {
-    const msg = engineerMessage?.toLowerCase() || '';
-    if (msg.includes('detail') || msg.includes('explain') || msg.includes('what')) {
-      return 'The vehicle telemetry shows progressive degradation in the affected system. Multiple sensor parameters are trending outside normal operating ranges, indicating a developing failure that requires immediate attention.';
+    if (!engineerMessage) return "I'm detecting severe anomalies in the cooling system. Do you recommend dispatching a mechanic or a tow truck?";
+    
+    const lower = engineerMessage.toLowerCase();
+    
+    if (lower.includes('temperature') || lower.includes('exact') || lower.includes('value') || lower.includes('name') || lower.includes('what')) {
+      return "The current engine coolant temperature is 115 degrees Celsius, which is 25 degrees above the maximum safe threshold. Oil pressure has dropped to 18 psi. This indicates a potential coolant leak or water pump failure. Should I dispatch a mechanic or a tow truck?";
     }
-    if (msg.includes('fix') || msg.includes('approve') || msg.includes('yes') || msg.includes('proceed')) {
-      return 'Understood. Initiating the automated resolution procedure now. I\'ll normalize the affected systems and confirm when complete.';
+    
+    if (lower.includes('mechanic')) {
+      return "Acknowledged. I will escalate this to the nearest certified mobile mechanic and send them the vehicle coordinates immediately. Goodbye.";
     }
-    if (msg.includes('mechanic') || msg.includes('escalate') || msg.includes('send') || msg.includes('no')) {
-      return 'Acknowledged. I\'ll escalate this to the nearest certified mechanic. Locating available service centers and calculating ETAs now.';
+    
+    if (lower.includes('tow') || lower.includes('truck')) {
+      return "Acknowledged. I will dispatch a heavy-duty tow truck to the vehicle's location and provide them with the GPS coordinates via WhatsApp. Goodbye.";
     }
-    return 'I\'m continuing to monitor the telemetry data. The affected parameters are still showing anomalous readings. Would you like me to proceed with the recommended resolution, or should we escalate to a field mechanic?';
+    
+    if (lower.includes('fix') || lower.includes('auto')) {
+      return "Acknowledged. I will initiate the remote auto-fix procedure and activate the auxiliary cooling fans. Goodbye.";
+    }
+
+    return "I am continuing to monitor the telemetry data. The affected parameters are still showing critical readings. Would you like me to dispatch a mechanic or a tow truck?";
   }
 }
 

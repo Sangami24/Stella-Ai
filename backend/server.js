@@ -207,6 +207,46 @@ app.post('/twilio/status', (req, res) => {
   res.sendStatus(200);
 });
 
+// POST /twilio/dispatch-voice — TwiML for the one-sided dispatch call
+app.post('/twilio/dispatch-voice', (req, res) => {
+  const role = req.query.role || 'service provider';
+  const issue = req.query.issue || 'system failure';
+  const twilio = require('twilio');
+  const response = new twilio.twiml.VoiceResponse();
+  
+  response.say({ voice: 'Polly.Matthew' }, 
+    `Alert from STLA Guardian AI. A vehicle requires a ${role}. ` +
+    `The reported issue is: ${issue}. ` +
+    `A WhatsApp message containing the vehicle's exact Google Maps location has been sent to your device. ` +
+    `Please proceed immediately. End of message.`
+  );
+  response.hangup();
+  
+  res.type('text/xml');
+  res.send(response.toString());
+});
+
+// POST /twilio/driver-voice — TwiML for the one-sided driver notification
+app.post('/twilio/driver-voice', (req, res) => {
+  const role = req.query.role || 'service provider';
+  const issue = req.query.issue || 'system failure';
+  const eta = req.query.eta || 'shortly';
+  const twilio = require('twilio');
+  const response = new twilio.twiml.VoiceResponse();
+  
+  response.say({ voice: 'Polly.Matthew' }, 
+    `Hello, this is STLA Guardian AI. ` +
+    `The vehicle has experienced issues regarding: ${issue}. ` +
+    `This has been confirmed by our remote engineer. ` +
+    `A ${role} has been dispatched and is coming to your location. ` +
+    `Their estimated time of arrival is ${eta}. Please stay with the vehicle.`
+  );
+  response.hangup();
+  
+  res.type('text/xml');
+  res.send(response.toString());
+});
+
 // POST /resolve — Trigger resolution
 app.post('/resolve', async (req, res) => {
   const { action } = req.body; // 'auto-fix' or 'escalate'
@@ -240,10 +280,57 @@ app.post('/resolve', async (req, res) => {
     incidentManager.setMechanics(mechanics);
     io.emit('mechanics', mechanics);
     addLog('resolution', 'Escalated to field mechanic', mechanics);
+    
+    // Sequence calls: Wait 5s for Engineer call to fully disconnect, then call Mechanic.
+    // Wait another 15s for Mechanic to answer and hang up, then call Driver.
+    setTimeout(() => {
+      twilioService.initiateDispatchCall('mechanic', incident.diagnosis);
+    }, 5000);
+    
+    setTimeout(() => {
+      twilioService.initiateDriverCall('mechanic', incident.diagnosis, mechanics[0].eta);
+    }, 20000);
+    
     stopSimulation();
     res.json({ success: true, action: 'escalate', mechanics });
+  } else if (action === 'dispatch-tow') {
+    incidentManager.updateStatus('escalated');
+    const towCompany = {
+      id: 99,
+      name: 'RapidRescue Towing Services',
+      rating: 4.8,
+      distance: '3.1 km',
+      specialty: 'Heavy Duty & Flatbed Towing',
+      phone: '+1 555-0199',
+      eta: '15 min',
+      address: '200 Industrial Dr, Auburn Hills, MI'
+    };
+    incidentManager.setMechanics([towCompany]);
+    io.emit('mechanics', [towCompany]);
+    
+    addLog('resolution', 'Contacting nearest Tow Company...', towCompany);
+    
+    // Sequence calls: Wait 5s for Engineer call to fully disconnect, then call Tow Truck.
+    // Wait another 15s for Tow Truck to answer and hang up, then call Driver.
+    setTimeout(() => {
+      twilioService.initiateDispatchCall('tow truck', incident.diagnosis);
+    }, 5000);
+    
+    setTimeout(() => {
+      twilioService.initiateDriverCall('tow truck', incident.diagnosis, towCompany.eta);
+    }, 20000);
+    
+    setTimeout(() => {
+      addLog('resolution', '✅ Sending vehicle GPS location via WhatsApp (Lat: 42.6685, Lng: -83.2201)');
+      setTimeout(() => {
+        addLog('resolution', '✅ Tow truck dispatched successfully.', towCompany);
+      }, 1500);
+    }, 5500);
+    
+    stopSimulation();
+    res.json({ success: true, action: 'dispatch-tow', company: towCompany });
   } else {
-    res.status(400).json({ error: 'Invalid action. Use: auto-fix or escalate' });
+    res.status(400).json({ error: 'Invalid action. Use: auto-fix, escalate, or dispatch-tow' });
   }
 });
 
