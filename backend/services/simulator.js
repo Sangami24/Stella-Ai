@@ -18,6 +18,11 @@ class SimulatorService {
       speed: 60,               // km/h
       vibration: 0.3,          // g
       throttle: 30,            // %
+      tirePressure: 32,        // psi
+      brakeTemp: 150,          // °C
+      fuelPressure: 45,        // psi
+      canErrorCount: 0,        // count
+      gpsCoordinates: '12.9716, 77.5946'
     };
   }
 
@@ -53,73 +58,53 @@ class SimulatorService {
     const severity = Math.min(tick / 8, 1); // 0→1 over 8 ticks
 
     return {
+      ...base,
       timestamp,
       rpm: Math.round(base.rpm + severity * (2000 + Math.sin(tick * 1.5) * 2500) + noise() * 200),
       oilPressure: Math.round((base.oilPressure - severity * 28 + noise() * 2) * 10) / 10,
       engineTemp: Math.round((base.engineTemp + severity * 25 + noise() * 2) * 10) / 10,
-      voltage: Math.round((base.voltage - severity * 1.5 + noise() * 0.3) * 10) / 10,
-      current: Math.round((base.current + severity * 15 + noise() * 3) * 10) / 10,
-      batterySoc: Math.round((base.batterySoc - severity * 8 + noise()) * 10) / 10,
-      coolantTemp: Math.round((base.coolantTemp + severity * 5 + noise()) * 10) / 10,
-      coolantPressure: Math.round((base.coolantPressure - severity * 2 + noise() * 0.5) * 10) / 10,
-      coolantFlowRate: Math.round((base.coolantFlowRate - severity * 1 + noise() * 0.3) * 10) / 10,
-      speed: Math.round(base.speed + noise() * 5),
-      vibration: Math.round((base.vibration + severity * 4.5 + noise() * 0.5) * 100) / 100,
-      throttle: Math.round(base.throttle + severity * 40 + noise() * 10),
+      vibration: Math.round((base.vibration + severity * 2.8 + noise() * 0.3) * 10) / 10,
+      canErrorCount: Math.round(severity * 15)
     };
   }
 
   /**
-   * Electrical Short Circuit Profile:
-   * - Voltage drops sharply (14V → <10V)
+   * Electrical Fault Profile:
+   * - Voltage drops below 11V
    * - Current spikes erratically
-   * - Battery SOC drains fast
-   * - Other systems show minor secondary effects
+   * - Battery SOC drains rapidly
    */
   _electricalFault(base, tick, noise, timestamp) {
-    const severity = Math.min(tick / 7, 1);
+    const severity = Math.min(tick / 8, 1);
 
     return {
+      ...base,
       timestamp,
-      rpm: Math.round(base.rpm + severity * (-100 + Math.random() * 300) + noise() * 50),
-      oilPressure: Math.round((base.oilPressure - severity * 5 + noise()) * 10) / 10,
-      engineTemp: Math.round((base.engineTemp + severity * 8 + noise()) * 10) / 10,
-      voltage: Math.round((base.voltage - severity * 5.5 + noise() * 0.8) * 10) / 10,
-      current: Math.round((base.current + severity * (45 + Math.sin(tick * 2) * 30) + noise() * 8) * 10) / 10,
-      batterySoc: Math.round((base.batterySoc - severity * 45 - tick * 3 + noise()) * 10) / 10,
-      coolantTemp: Math.round((base.coolantTemp + severity * 3 + noise()) * 10) / 10,
-      coolantPressure: Math.round((base.coolantPressure + noise() * 0.5) * 10) / 10,
-      coolantFlowRate: Math.round((base.coolantFlowRate - severity * 0.5 + noise() * 0.2) * 10) / 10,
-      speed: Math.round(base.speed - severity * 10 + noise() * 3),
-      vibration: Math.round((base.vibration + severity * 0.8 + noise() * 0.2) * 100) / 100,
-      throttle: Math.round(base.throttle - severity * 10 + noise() * 5),
+      voltage: Math.round((base.voltage - severity * 3.5 + noise() * 0.5) * 10) / 10,
+      current: Math.round(base.current + severity * (30 + Math.abs(noise()) * 20)),
+      batterySoc: Math.round(base.batterySoc - severity * (15 + tick * 1.5)),
+      canErrorCount: Math.round(severity * 25)
     };
   }
 
   /**
-   * Coolant System Breakdown Profile:
-   * - Coolant temp climbs rapidly (88°C → 120°C+)
+   * Coolant Fault Profile:
+   * - Coolant temp spikes rapidly
    * - Coolant pressure drops
-   * - Flow rate decreases
-   * - Engine temp follows up with delay
+   * - Flow rate drops
+   * - Engine temp follows with a delay
    */
   _coolantFault(base, tick, noise, timestamp) {
-    const severity = Math.min(tick / 6, 1);
-
+    const severity = Math.min(tick / 8, 1);
+    
     return {
+      ...base,
       timestamp,
-      rpm: Math.round(base.rpm + severity * 200 + noise() * 100),
-      oilPressure: Math.round((base.oilPressure - severity * 8 + noise()) * 10) / 10,
-      engineTemp: Math.round((base.engineTemp + severity * 35 + tick * 2 + noise() * 2) * 10) / 10,
-      voltage: Math.round((base.voltage - severity * 0.8 + noise() * 0.3) * 10) / 10,
-      current: Math.round((base.current + severity * 5 + noise() * 2) * 10) / 10,
-      batterySoc: Math.round((base.batterySoc - severity * 5 + noise()) * 10) / 10,
-      coolantTemp: Math.round((base.coolantTemp + severity * 40 + tick * 3 + noise() * 2) * 10) / 10,
-      coolantPressure: Math.round((base.coolantPressure - severity * 12 + noise() * 0.5) * 10) / 10,
-      coolantFlowRate: Math.round((base.coolantFlowRate - severity * 6.5 + noise() * 0.3) * 10) / 10,
-      speed: Math.round(base.speed - severity * 15 + noise() * 3),
-      vibration: Math.round((base.vibration + severity * 1.2 + noise() * 0.3) * 100) / 100,
-      throttle: Math.round(base.throttle - severity * 5 + noise() * 3),
+      coolantTemp: Math.round((base.coolantTemp + severity * 30 + noise() * 1.5) * 10) / 10,
+      coolantPressure: Math.round((base.coolantPressure - severity * 10 + noise()) * 10) / 10,
+      coolantFlowRate: Math.round((base.coolantFlowRate - severity * 6 + noise() * 0.5) * 10) / 10,
+      engineTemp: Math.round((base.engineTemp + severity * 15 + noise()) * 10) / 10,
+      canErrorCount: Math.round(severity * 5)
     };
   }
 

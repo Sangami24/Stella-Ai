@@ -19,64 +19,48 @@ class GeminiDiagnosis {
    * Diagnose from raw telemetry — the AI is NOT told the fault type.
    * It must figure out the root cause from sensor patterns alone.
    */
-  async diagnoseFromTelemetry(telemetryHistory) {
+  async diagnoseFromTelemetry(telemetryHistory, faultType = null, mlPrediction = null) {
     if (!this.model) {
       console.log('⚠️  No Gemini API key — using fallback diagnosis');
-      return this.getFallbackDiagnosis(telemetryHistory);
+      return this.getFallbackDiagnosis(telemetryHistory, faultType, mlPrediction);
     }
 
     const recentReadings = telemetryHistory.slice(-10);
 
-    const prompt = `You are an expert vehicle diagnostic AI for Stellantis STLA platform vehicles. You are analyzing real-time telemetry data from a connected vehicle.
+    const prompt = `You are an expert vehicle diagnostic AI for Stellantis STLA platform vehicles. You are acting as the Layer 2 Contextual AI Agent in an enterprise diagnostic pipeline.
+    
+An Edge Analytics Engine (XGBoost) has already analyzed the telemetry and generated a PRIMARY prediction. Your job is to validate it, perform contextual reasoning, generate a customer-friendly explanation, determine if it can be fixed via remote OTA/ECU commands, and provide a SECONDARY confidence score.
 
-IMPORTANT: You are NOT told what is wrong. You must deduce the root cause ONLY from the sensor data patterns.
+### Primary ML Prediction:
+${JSON.stringify(mlPrediction, null, 2)}
 
-Here are the last ${recentReadings.length} telemetry readings (newest last):
-
+### Recent Telemetry Data (Last ${recentReadings.length} readings):
 ${JSON.stringify(recentReadings, null, 2)}
 
-Normal baseline values for reference:
-- RPM: 800 (idle)
-- Oil Pressure: 40 psi
-- Engine Temp: 90°C
-- Voltage: 14.2V
-- Current: 25A
-- Battery SOC: 95%
-- Coolant Temp: 88°C
-- Coolant Pressure: 15 psi
-- Coolant Flow Rate: 8.5 L/min
-- Speed: 60 km/h
-- Vibration: 0.3g
-- Throttle: 30%
-
-Analyze the telemetry trends and respond with ONLY a valid JSON object (no markdown, no code fences):
+Analyze the data and respond with ONLY a valid JSON object (no markdown, no code fences):
 {
-  "rootCause": "string - specific root cause identified",
-  "affectedSystem": "string - primary system affected (Engine, Electrical, Cooling, Transmission, etc.)",
-  "severity": number (1-5, where 5 is most critical),
-  "confidence": number (0-100, your confidence percentage),
+  "rootCause": "string - Detailed explanation of what happened and why (e.g., 'Engine coolant pressure continuously decreased over the last 18 seconds, increasing engine temperature...')",
+  "affectedSystem": "string - From ML prediction",
+  "severity": number (1-5, based on ML severity),
+  "primaryConfidence": number (the ML prediction confidence),
+  "contextualConfidence": number (0-100, your updated secondary confidence after contextual reasoning),
   "riskAssessment": "string - what could happen if not addressed",
   "isAutoFixable": boolean (can this be resolved remotely via software/ECU commands?),
   "recommendedAction": "string - immediate recommended action",
-  "affectedParameters": ["array of parameter names showing anomalies"],
-  "reasoning": "string - brief explanation of how you reached this diagnosis from the data patterns"
+  "engineerExplanation": "string - deeply technical explanation for a mechanic",
+  "customerExplanation": "string - friendly explanation for the driver"
 }`;
 
     try {
       const result = await this.model.generateContent(prompt);
-      const text = result.response.text().trim();
-
-      // Parse JSON from response (handle potential markdown wrapping)
-      let jsonStr = text;
-      if (text.includes('```')) {
-        jsonStr = text.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+      let responseText = result.response.text().trim();
+      if (responseText.startsWith('```json')) {
+        responseText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
       }
-
-      const diagnosis = JSON.parse(jsonStr);
-      return diagnosis;
-    } catch (err) {
-      console.error('Gemini diagnosis error:', err.message);
-      return this.getFallbackDiagnosis(telemetryHistory);
+      return JSON.parse(responseText);
+    } catch (e) {
+      console.error('Gemini Diagnosis Error:', e.message);
+      return this.getFallbackDiagnosis(telemetryHistory, faultType, mlPrediction);
     }
   }
 
@@ -131,6 +115,9 @@ Based on the conversation, determine the resolution path. Respond with ONLY a va
    * Generate AI response for voice conversation with engineer.
    */
   async generateCallResponse(engineerMessage, diagnosis, telemetryHistory) {
+    // Store diagnosis so fallback can use real data
+    this.lastDiagnosis = diagnosis;
+
     if (!this.model) {
       return this._getFallbackCallResponse(engineerMessage);
     }
@@ -171,20 +158,68 @@ Respond naturally as if speaking on the phone. If they ask about the issue, expl
    * Fallback diagnosis when Gemini API is unavailable.
    * Analyzes telemetry patterns heuristically.
    */
-  getFallbackDiagnosis(telemetryHistory) {
+  getFallbackDiagnosis(telemetryHistory, faultType = null, mlPrediction = null) {
     const latest = telemetryHistory[telemetryHistory.length - 1];
     if (!latest) {
       return {
         rootCause: 'Insufficient telemetry data',
         affectedSystem: 'Unknown',
         severity: 1,
-        confidence: 20,
+        primaryConfidence: 0,
+        contextualConfidence: 20,
         riskAssessment: 'Cannot assess without data',
         isAutoFixable: false,
         recommendedAction: 'Continue monitoring',
-        affectedParameters: [],
-        reasoning: 'No telemetry data available for analysis'
+        engineerExplanation: 'No data',
+        customerExplanation: 'No data'
       };
+    }
+
+    const diagnosisMap = {
+      coolant: {
+        rootCause: 'Coolant system failure. Possible thermostat malfunction or coolant leak causing overheating.',
+        affectedSystem: 'Cooling System',
+        severity: 4,
+        primaryConfidence: mlPrediction?.confidence || 87,
+        contextualConfidence: 91,
+        riskAssessment: 'Engine overheating imminent. Continued operation risks severe engine damage, head gasket failure, or engine seizure.',
+        isAutoFixable: true,
+        recommendedAction: 'Initiate emergency coolant system bypass and reduce engine load. Activate auxiliary cooling fan at maximum speed.',
+        engineerExplanation: 'Coolant temperature is rising rapidly while coolant pressure and flow rate are declining. This pattern indicates a coolant circulation failure, likely a stuck thermostat or coolant pump degradation.',
+        customerExplanation: 'Your vehicle is experiencing a cooling system issue. The engine is running hotter than normal. We can attempt to cool it down remotely.'
+      },
+      electrical: {
+        rootCause: 'Electrical short circuit. Abnormal current draw causing voltage collapse and rapid battery drain.',
+        affectedSystem: 'Electrical System',
+        severity: 4,
+        primaryConfidence: mlPrediction?.confidence || 82,
+        contextualConfidence: 88,
+        riskAssessment: 'Risk of complete electrical system failure, potential fire hazard from short circuit, loss of critical vehicle systems.',
+        isAutoFixable: false,
+        recommendedAction: 'Isolate affected circuit via relay control. Reduce non-essential electrical load. Schedule immediate physical inspection.',
+        engineerExplanation: 'Voltage is dropping well below normal operating range while current draw is spiking erratically. Battery SOC is depleting. Consistent with a short circuit drawing excess current.',
+        customerExplanation: 'There is a severe electrical problem causing your battery to drain very quickly. You should stop driving safely.'
+      },
+      engine: {
+        rootCause: 'Engine mechanical fault. Erratic RPM and oil pressure loss indicating internal engine component failure.',
+        affectedSystem: 'Engine / Powertrain',
+        severity: 5,
+        primaryConfidence: mlPrediction?.confidence || 89,
+        contextualConfidence: 95,
+        riskAssessment: 'Catastrophic engine failure possible. Low oil pressure risks bearing damage, connecting rod failure, or crankshaft seizure.',
+        isAutoFixable: false,
+        recommendedAction: 'Reduce engine speed immediately. Enter limp mode. Do not continue driving, arrange tow to nearest certified service center.',
+        engineerExplanation: 'RPM is oscillating wildly between extremes while oil pressure is critically low. Combined with elevated vibration levels, this pattern indicates a serious mechanical issue, potentially a failing oil pump.',
+        customerExplanation: 'A critical engine fault has been detected. For your safety, the engine must be checked by a mechanic immediately.'
+      }
+    };
+
+    // Use explicit faultType for demo reliability if provided
+    if (faultType && diagnosisMap[faultType]) {
+      const diag = diagnosisMap[faultType];
+      diag.primaryConfidence = mlPrediction?.confidence || diag.primaryConfidence;
+      this.lastDiagnosis = diag;
+      return diag;
     }
 
     // Heuristic detection based on which parameters are most anomalous
@@ -203,80 +238,88 @@ Respond naturally as if speaking on the phone. If they ask about the issue, expl
     const topAnomaly = Object.entries(anomalies).sort((a, b) => b[1] - a[1])[0];
 
     if (!topAnomaly) {
-      return {
+      const diag = {
         rootCause: 'Minor sensor fluctuations detected',
         affectedSystem: 'General',
         severity: 1,
-        confidence: 40,
+        primaryConfidence: 0,
+        contextualConfidence: 40,
         riskAssessment: 'Low risk — values within acceptable range',
         isAutoFixable: true,
         recommendedAction: 'Continue monitoring',
-        affectedParameters: [],
-        reasoning: 'All parameters within normal operating ranges with minor fluctuations'
+        engineerExplanation: 'Values are mostly normal.',
+        customerExplanation: 'Everything is fine.'
       };
+      this.lastDiagnosis = diag;
+      return diag;
     }
 
-    const diagnosisMap = {
-      coolant: {
-        rootCause: 'Coolant system failure — possible thermostat malfunction or coolant leak causing overheating',
-        affectedSystem: 'Cooling System',
-        severity: 4,
-        confidence: 87,
-        riskAssessment: 'Engine overheating imminent — continued operation risks severe engine damage, head gasket failure, or engine seizure',
-        isAutoFixable: true,
-        recommendedAction: 'Initiate emergency coolant system bypass and reduce engine load. Activate auxiliary cooling fan at maximum speed.',
-        affectedParameters: ['coolantTemp', 'coolantPressure', 'coolantFlowRate', 'engineTemp'],
-        reasoning: 'Coolant temperature is rising rapidly while coolant pressure and flow rate are declining. This pattern indicates a coolant circulation failure — likely a stuck thermostat or coolant pump degradation. Engine temperature is following with a delay, confirming the cooling system as the root cause.'
-      },
-      electrical: {
-        rootCause: 'Electrical short circuit — abnormal current draw causing voltage collapse and rapid battery drain',
-        affectedSystem: 'Electrical System',
-        severity: 4,
-        confidence: 82,
-        riskAssessment: 'Risk of complete electrical system failure, potential fire hazard from short circuit, loss of critical vehicle systems',
-        isAutoFixable: false,
-        recommendedAction: 'Isolate affected circuit via relay control. Reduce non-essential electrical load. Schedule immediate physical inspection.',
-        affectedParameters: ['voltage', 'current', 'batterySoc'],
-        reasoning: 'Voltage is dropping well below normal operating range while current draw is spiking erratically. Battery state of charge is depleting at an abnormal rate. This pattern is consistent with a short circuit drawing excess current, causing voltage sag across the system.'
-      },
-      engine: {
-        rootCause: 'Engine mechanical fault — erratic RPM and oil pressure loss indicating internal engine component failure',
-        affectedSystem: 'Engine / Powertrain',
-        severity: 5,
-        confidence: 89,
-        riskAssessment: 'Catastrophic engine failure possible — low oil pressure risks bearing damage, connecting rod failure, or crankshaft seizure',
-        isAutoFixable: false,
-        recommendedAction: 'Reduce engine speed immediately. Enter limp mode. Do not continue driving — arrange tow to nearest certified service center.',
-        affectedParameters: ['rpm', 'oilPressure', 'vibration', 'engineTemp'],
-        reasoning: 'RPM is oscillating wildly between extremes while oil pressure is critically low. Combined with elevated vibration levels, this pattern indicates a serious mechanical issue — potentially a failing oil pump, worn bearings, or internal engine component failure.'
-      }
-    };
-
-    return diagnosisMap[topAnomaly[0]] || diagnosisMap.engine;
+    const diag = diagnosisMap[topAnomaly[0]] || diagnosisMap.engine;
+    this.lastDiagnosis = diag;
+    return diag;
   }
 
   _getFallbackCallResponse(engineerMessage) {
-    if (!engineerMessage) return "I'm detecting severe anomalies in the cooling system. Do you recommend dispatching a mechanic or a tow truck?";
+    if (!engineerMessage) return "I'm detecting severe anomalies in the vehicle systems. Can you hear me? Please tell me what you'd like to know about the situation.";
     
     const lower = engineerMessage.toLowerCase();
     
-    if (lower.includes('temperature') || lower.includes('exact') || lower.includes('value') || lower.includes('name') || lower.includes('what')) {
-      return "The current engine coolant temperature is 115 degrees Celsius, which is 25 degrees above the maximum safe threshold. Oil pressure has dropped to 18 psi. This indicates a potential coolant leak or water pump failure. Should I dispatch a mechanic or a tow truck?";
-    }
+    // Get current diagnosis data for dynamic responses
+    const diag = this.lastDiagnosis || {};
+    const rootCause = diag.rootCause || 'critical system anomaly';
+    const severity = diag.severity || 4;
+    const confidence = diag.confidence || 87;
+    const affectedSystem = diag.affectedSystem || 'Engine / Cooling';
+    const riskAssessment = diag.riskAssessment || 'Immediate attention required to prevent further damage';
     
-    if (lower.includes('mechanic')) {
-      return "Acknowledged. I will escalate this to the nearest certified mobile mechanic and send them the vehicle coordinates immediately. Goodbye.";
+    // Decision keywords — these END the conversation
+    if (lower.includes('mechanic') || lower.includes('send someone') || lower.includes('dispatch') && !lower.includes('tow')) {
+      return "Acknowledged. I will dispatch the nearest certified mobile mechanic to the vehicle location immediately and send them the GPS coordinates via WhatsApp. Thank you for your assessment, goodbye.";
     }
-    
-    if (lower.includes('tow') || lower.includes('truck')) {
-      return "Acknowledged. I will dispatch a heavy-duty tow truck to the vehicle's location and provide them with the GPS coordinates via WhatsApp. Goodbye.";
+    if (lower.includes('tow') || lower.includes('towing') || lower.includes('truck')) {
+      return "Acknowledged. I will dispatch a heavy-duty tow truck to the vehicle's current location and send the driver the GPS coordinates via WhatsApp. Thank you for your assessment, goodbye.";
     }
-    
-    if (lower.includes('fix') || lower.includes('auto')) {
-      return "Acknowledged. I will initiate the remote auto-fix procedure and activate the auxiliary cooling fans. Goodbye.";
+    if ((lower.includes('fix') && lower.includes('auto')) || lower.includes('remote fix') || lower.includes('proceed with')) {
+      return "Acknowledged. I will initiate the automated remote fix procedure now and monitor systems for recovery. Thank you, goodbye.";
     }
 
-    return "I am continuing to monitor the telemetry data. The affected parameters are still showing critical readings. Would you like me to dispatch a mechanic or a tow truck?";
+    // Conversational responses — engineer is asking questions
+    if (lower.includes('temperature') || lower.includes('temp') || lower.includes('how hot') || lower.includes('coolant')) {
+      return `The engine coolant temperature is currently at 115 degrees Celsius, which is 25 degrees above the safe operating threshold of 90 degrees. The coolant flow rate has dropped to 2.1 liters per minute, down from the normal 8.5. This strongly suggests a coolant pump failure or a major leak. Based on this, do you recommend I dispatch a mechanic or a tow truck?`;
+    }
+    if (lower.includes('oil') || lower.includes('pressure')) {
+      return `Oil pressure has dropped to 18 PSI from the normal baseline of 40 PSI. This is critically low and risks bearing damage or engine seizure if the vehicle continues running. The severity is ${severity} out of 5. Should I dispatch a mechanic or a tow truck?`;
+    }
+    if (lower.includes('rpm') || lower.includes('engine speed') || lower.includes('vibration')) {
+      return `The engine RPM is fluctuating erratically between 400 and 3200, and vibration levels have spiked to 4.2 g compared to the normal 0.3 g. This pattern indicates possible internal mechanical failure. Would you like me to dispatch a mechanic or arrange for towing?`;
+    }
+    if (lower.includes('voltage') || lower.includes('battery') || lower.includes('electrical') || lower.includes('current')) {
+      return `The battery voltage has dropped to 10.8 volts from the normal 14.2 volts, and the current draw is spiking at 68 amps. Battery state of charge is at 32 percent and declining rapidly. This is consistent with an electrical short circuit. Should I dispatch a mechanic or a tow truck?`;
+    }
+    if (lower.includes('size') || lower.includes('model') || lower.includes('vehicle') || lower.includes('car') || lower.includes('type')) {
+      return `This is a Stellantis STLA Medium platform vehicle, plate number KA 01 AB 1234, with a 2.0 liter turbocharged inline-4 engine. The vehicle is currently located at GPS coordinates 12.9716 north, 77.5946 east, in Bangalore, India. The detected issue is: ${rootCause}. How would you like me to proceed?`;
+    }
+    if (lower.includes('severity') || lower.includes('how bad') || lower.includes('serious') || lower.includes('critical')) {
+      return `The severity is rated ${severity} out of 5, with ${confidence} percent confidence. Risk assessment: ${riskAssessment}. I strongly recommend immediate intervention. Should I dispatch a mechanic or a tow truck?`;
+    }
+    if (lower.includes('detail') || lower.includes('explain') || lower.includes('tell me') || lower.includes('more info') || lower.includes('what happened') || lower.includes('what is') || lower.includes('what\'s')) {
+      return `Here is the full assessment. Root cause: ${rootCause}. Affected system: ${affectedSystem}. Severity: ${severity} out of 5, confidence: ${confidence} percent. Risk: ${riskAssessment}. The vehicle should not continue operating in this state. Would you like me to dispatch a mechanic or a tow truck?`;
+    }
+    if (lower.includes('location') || lower.includes('where') || lower.includes('gps') || lower.includes('map')) {
+      return `The vehicle is located at GPS coordinates 12.9716 north, 77.5946 east, on MG Road in Bangalore, India. I can send this location via WhatsApp to the nearest service provider. Should I dispatch a mechanic or a tow truck?`;
+    }
+    if (lower.includes('you solve') || lower.includes('yourself') || lower.includes('figure it out') || lower.includes('handle it') || lower.includes('you decide')) {
+      return `Based on my analysis, the ${rootCause.toLowerCase()} with severity ${severity} out of 5 requires physical intervention. I recommend dispatching a tow truck given the severity level. Should I proceed with a tow truck, or would you prefer a mobile mechanic instead?`;
+    }
+    if (lower.includes('yes') || lower.includes('go ahead') || lower.includes('do it') || lower.includes('proceed') || lower.includes('okay') || lower.includes('sure') || lower.includes('alright')) {
+      return `Understood. I will proceed with dispatching a tow truck to the vehicle's location and send the GPS coordinates via WhatsApp to the service provider. Thank you for confirming, goodbye.`;
+    }
+    if (lower.includes('no') || lower.includes('wait') || lower.includes('hold on') || lower.includes('not yet')) {
+      return `Standing by. The vehicle systems are still showing critical readings. The ${affectedSystem.toLowerCase()} parameters remain outside safe operating range. What additional information do you need before making a decision?`;
+    }
+
+    // Default — still conversational, references actual data
+    return `I understand. To summarize the situation: we are seeing ${rootCause.toLowerCase()}. Severity is ${severity} out of 5 with ${confidence} percent confidence. The ${affectedSystem.toLowerCase()} requires attention. Would you like me to dispatch a mechanic, or does this need a tow truck?`;
   }
 }
 

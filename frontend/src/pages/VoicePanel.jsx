@@ -161,18 +161,24 @@ export default function VoicePanel() {
                 <p className="text-sm text-dash-accent font-semibold">{diagnosis.affectedSystem}</p>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="bg-dash-bg/50 rounded-lg p-3 text-center">
-                  <div className="text-2xl font-display font-bold text-dash-accent">
-                    {diagnosis.confidence}%
+              <div className="grid grid-cols-3 gap-3">
+                <div className="bg-dash-bg/50 rounded-lg p-3 text-center border border-dash-border">
+                  <div className="text-xl font-display font-bold text-dash-accent">
+                    {diagnosis.primaryConfidence}%
                   </div>
-                  <div className="text-[10px] text-dash-muted uppercase tracking-wider">Confidence</div>
+                  <div className="text-[9px] text-dash-muted uppercase tracking-wider mt-1">ML Confidence</div>
                 </div>
-                <div className="bg-dash-bg/50 rounded-lg p-3 text-center">
-                  <div className="text-2xl font-display font-bold text-dash-danger">
+                <div className="bg-dash-bg/50 rounded-lg p-3 text-center border border-dash-border">
+                  <div className="text-xl font-display font-bold text-purple-400">
+                    {diagnosis.contextualConfidence}%
+                  </div>
+                  <div className="text-[9px] text-dash-muted uppercase tracking-wider mt-1">AI Confidence</div>
+                </div>
+                <div className="bg-dash-bg/50 rounded-lg p-3 text-center border border-dash-border">
+                  <div className="text-xl font-display font-bold text-dash-danger">
                     {diagnosis.severity}/5
                   </div>
-                  <div className="text-[10px] text-dash-muted uppercase tracking-wider">Severity</div>
+                  <div className="text-[9px] text-dash-muted uppercase tracking-wider mt-1">Severity</div>
                 </div>
               </div>
 

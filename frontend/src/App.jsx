@@ -25,6 +25,7 @@ const tabs = [
 function App() {
   const activeTab = useStore((s) => s.activeTab);
   const setActiveTab = useStore((s) => s.setActiveTab);
+  const healthScore = useStore((s) => s.healthScore);
   const incident = useStore((s) => s.incident);
 
   useEffect(() => {
@@ -56,6 +57,14 @@ function App() {
 
     socket.on('diagnosis', (diagnosis) => {
       useStore.getState().setDiagnosis(diagnosis);
+    });
+
+    socket.on('health-score', (score) => {
+      useStore.getState().setHealthScore(score);
+    });
+
+    socket.on('recovery-progress', (progress) => {
+      useStore.getState().setRecoveryProgress(progress);
     });
 
     socket.on('call-status', (status) => {
@@ -190,11 +199,22 @@ function App() {
             </span>
           </motion.div>
 
-          {/* Team Badge */}
-          <div className="flex items-center gap-2 text-dash-muted text-xs">
-            <span className="font-display tracking-wider">TEAM FALCONS</span>
-            <span className="text-dash-border">|</span>
-            <span>STELLANTIS IGNITE</span>
+          <div className="flex items-center gap-4">
+            {/* Health Score */}
+            <div className="flex items-center gap-2 px-3 py-1 bg-dash-bg/50 border border-dash-border rounded-lg">
+              <span className="text-[10px] text-dash-muted uppercase tracking-wider">Health Score</span>
+              <span className={`text-sm font-bold ${
+                healthScore >= 90 ? 'text-green-400' :
+                healthScore >= 70 ? 'text-yellow-400' : 'text-red-400'
+              }`}>{healthScore}</span>
+            </div>
+
+            {/* Team Badge */}
+            <div className="flex items-center gap-2 text-dash-muted text-xs">
+              <span className="font-display tracking-wider">TEAM FALCONS</span>
+              <span className="text-dash-border">|</span>
+              <span>STELLANTIS IGNITE</span>
+            </div>
           </div>
         </div>
       </header>

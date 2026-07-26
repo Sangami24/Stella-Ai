@@ -11,6 +11,8 @@ const useStore = create((set, get) => ({
   // ── Incident State ──────────────────────────────────
   incident: null,
   diagnosis: null,
+  healthScore: 100,
+  recoveryProgress: null,
 
   // ── Call State ──────────────────────────────────────
   callStatus: null,
@@ -48,6 +50,10 @@ const useStore = create((set, get) => ({
 
   setDiagnosis: (diagnosis) => set({ diagnosis }),
 
+  setHealthScore: (score) => set({ healthScore: score }),
+
+  setRecoveryProgress: (progress) => set({ recoveryProgress: progress }),
+
   setCallStatus: (status) => set({ callStatus: status }),
 
   addTranscriptLine: (line) => set((state) => ({
@@ -74,6 +80,8 @@ const useStore = create((set, get) => ({
       return await res.json();
     } catch (err) {
       console.error('Simulate fault error:', err);
+    } finally {
+      set({ isSimulating: false });
     }
   },
 

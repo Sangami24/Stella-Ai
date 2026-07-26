@@ -9,6 +9,8 @@ const { AnomalyDetector } = require('./services/anomalyDetector');
 const { IncidentManager } = require('./services/incidentManager');
 const { GeminiDiagnosis } = require('./services/geminiDiagnosis');
 const { TwilioCallService } = require('./services/twilioCall');
+const mlClient = require('./services/mlClient');
+const RecoveryEngine = require('./services/recoveryEngine');
 
 const app = express();
 const server = http.createServer(app);
@@ -26,6 +28,7 @@ const anomalyDetector = new AnomalyDetector();
 const incidentManager = new IncidentManager(io);
 const gemini = new GeminiDiagnosis();
 const twilioService = new TwilioCallService(io, incidentManager);
+const recoveryEngine = new RecoveryEngine(incidentManager, io, twilioService);
 
 // ── Telemetry state ───────────────────────────────────────
 let telemetryHistory = [];
@@ -74,7 +77,7 @@ app.post('/simulate-fault', async (req, res) => {
   // Create initial incident
   incidentManager.createIncident(type);
 
-  // Start telemetry streaming every 2 seconds
+  // Start telemetry streaming every 1 second for faster demo
   let tick = 0;
   telemetryInterval = setInterval(async () => {
     tick++;
@@ -91,39 +94,72 @@ app.post('/simulate-fault', async (req, res) => {
       io.emit('anomalies', anomalies);
       addLog('anomaly', `Anomalies detected: ${anomalies.map(a => a.parameter).join(', ')}`, anomalies);
 
-      // Auto-trigger diagnosis after enough anomalous readings (tick >= 3)
-      if (tick >= 3 && incidentManager.getIncident()?.status === 'detected') {
+      // Auto-trigger diagnosis after enough anomalous readings (tick >= 2)
+      if (tick >= 2 && incidentManager.getIncident()?.status === 'detected') {
         incidentManager.updateStatus('diagnosing');
-        addLog('ai', 'Triggering AI diagnosis from telemetry...');
+        addLog('ai', 'Triggering ML Edge Analytics Engine...');
 
-        try {
-          const diagnosis = await gemini.diagnoseFromTelemetry(telemetryHistory);
-          incidentManager.setDiagnosis(diagnosis);
-          addLog('ai', 'Diagnosis complete', diagnosis);
-          io.emit('diagnosis', diagnosis);
+        setTimeout(async () => {
+          try {
+            // 1. Edge Analytics (Primary ML Confidence)
+            let mlPrediction = await mlClient.predict(telemetryHistory);
+            
+            if (mlPrediction) {
+              addLog('ai', 'ML Prediction Received', mlPrediction);
+              io.emit('health-score', mlPrediction.healthScore);
+            } else {
+              // Fallback if Python ML is down
+              mlPrediction = {
+                fault: currentFaultType,
+                probability: 0.9,
+                confidence: 90,
+                severity: 4,
+                healthScore: 60
+              };
+              io.emit('health-score', 60);
+            }
 
-          // Auto-trigger call after diagnosis
-          setTimeout(async () => {
-            if (incidentManager.getIncident()?.status === 'diagnosed') {
-              await initiateCallFlow();
+            // Threshold Logic
+            if (mlPrediction.confidence < 60) {
+              addLog('system', 'Confidence < 60%. Continuing to monitor.');
+              incidentManager.updateStatus('detected'); // revert
+              return;
+            } else if (mlPrediction.confidence < 75) {
+              addLog('system', 'Warning threshold reached. Monitoring closely.');
             }
-          }, 2000);
-        } catch (err) {
-          addLog('error', `Diagnosis failed: ${err.message}`);
-          // Use fallback diagnosis
-          const fallback = gemini.getFallbackDiagnosis(telemetryHistory);
-          incidentManager.setDiagnosis(fallback);
-          io.emit('diagnosis', fallback);
-          addLog('ai', 'Using fallback diagnosis', fallback);
-          setTimeout(async () => {
-            if (incidentManager.getIncident()?.status === 'diagnosed') {
-              await initiateCallFlow();
-            }
-          }, 2000);
-        }
+
+            // 2. Gemini Contextual AI (Secondary Confidence)
+            addLog('ai', 'Triggering Gemini Contextual Reasoning...');
+            const diagnosis = await gemini.diagnoseFromTelemetry(telemetryHistory, currentFaultType, mlPrediction);
+            
+            incidentManager.setDiagnosis(diagnosis);
+            addLog('ai', 'Diagnosis complete', diagnosis);
+            io.emit('diagnosis', diagnosis);
+
+            // Trigger Recovery Engine
+            setTimeout(async () => {
+              if (incidentManager.getIncident()?.status === 'diagnosed') {
+                await recoveryEngine.executeRecovery(diagnosis);
+              }
+            }, 2000);
+          } catch (err) {
+            addLog('error', `Diagnosis failed: ${err.message}`);
+            // Use fallback diagnosis
+            const fallback = gemini.getFallbackDiagnosis(telemetryHistory, currentFaultType, mlPrediction);
+            incidentManager.setDiagnosis(fallback);
+            io.emit('diagnosis', fallback);
+            addLog('ai', 'Using fallback diagnosis', fallback);
+            // Trigger Recovery Engine on fallback
+            setTimeout(async () => {
+              if (incidentManager.getIncident()?.status === 'diagnosed') {
+                await recoveryEngine.executeRecovery(fallback);
+              }
+            }, 2000);
+          }
+        }, 0);
       }
     }
-  }, 2000);
+  }, 1000);
 
   res.json({ success: true, faultType: type, message: `Simulation started for ${type} fault` });
 });
@@ -199,11 +235,42 @@ app.post('/twilio/gather', async (req, res) => {
   res.send(twiml);
 });
 
-// POST /twilio/status — Call status callback
+// POST /twilio/status — Call status callback (engineer call)
 app.post('/twilio/status', (req, res) => {
   const status = req.body.CallStatus;
-  addLog('call', `Call status: ${status}`);
+  addLog('call', `Engineer call status: ${status}`);
   twilioService.handleCallStatus(status);
+  res.sendStatus(200);
+});
+
+// POST /twilio/dispatch-status — Status callback for mechanic/tow call
+app.post('/twilio/dispatch-status', (req, res) => {
+  const status = req.body.CallStatus;
+  addLog('call', `Service provider call status: ${status}`);
+
+  if (status === 'completed' || status === 'busy' || status === 'no-answer' || status === 'failed') {
+    // Mechanic/tow call is done — NOW call the driver
+    const incident = incidentManager.getIncident();
+    if (incident && incident.pendingDriverCall) {
+      const { role, diagnosis, eta } = incident.pendingDriverCall;
+      addLog('call', `Mechanic/tow call ended. Waiting 3s before calling the driver...`);
+      setTimeout(() => {
+        twilioService.initiateDriverCall(role, diagnosis, eta);
+      }, 3000);
+      incident.pendingDriverCall = null; // Clear it
+    }
+  }
+  res.sendStatus(200);
+});
+
+// POST /twilio/driver-status — Status callback for driver call
+app.post('/twilio/driver-status', (req, res) => {
+  const status = req.body.CallStatus;
+  addLog('call', `Driver call status: ${status}`);
+  if (status === 'completed') {
+    incidentManager.setCallStatus('all-calls-done');
+    addLog('resolution', '✅ All notification calls completed successfully.');
+  }
   res.sendStatus(200);
 });
 
@@ -281,15 +348,14 @@ app.post('/resolve', async (req, res) => {
     io.emit('mechanics', mechanics);
     addLog('resolution', 'Escalated to field mechanic', mechanics);
     
-    // Sequence calls: Wait 5s for Engineer call to fully disconnect, then call Mechanic.
-    // Wait another 15s for Mechanic to answer and hang up, then call Driver.
+    // Store the pending driver call — it will fire when dispatch-status says mechanic call completed
+    const inc = incidentManager.getIncident();
+    inc.pendingDriverCall = { role: 'mechanic', diagnosis: incident.diagnosis, eta: mechanics[0].eta };
+    
+    // Wait 3s for Engineer call to disconnect, then call Mechanic
     setTimeout(() => {
       twilioService.initiateDispatchCall('mechanic', incident.diagnosis);
-    }, 5000);
-    
-    setTimeout(() => {
-      twilioService.initiateDriverCall('mechanic', incident.diagnosis, mechanics[0].eta);
-    }, 20000);
+    }, 3000);
     
     stopSimulation();
     res.json({ success: true, action: 'escalate', mechanics });
@@ -310,22 +376,14 @@ app.post('/resolve', async (req, res) => {
     
     addLog('resolution', 'Contacting nearest Tow Company...', towCompany);
     
-    // Sequence calls: Wait 5s for Engineer call to fully disconnect, then call Tow Truck.
-    // Wait another 15s for Tow Truck to answer and hang up, then call Driver.
+    // Store the pending driver call — it will fire when dispatch-status says tow call completed
+    const inc2 = incidentManager.getIncident();
+    inc2.pendingDriverCall = { role: 'tow truck', diagnosis: incident.diagnosis, eta: towCompany.eta };
+    
+    // Wait 3s for Engineer call to disconnect, then call Tow Truck
     setTimeout(() => {
       twilioService.initiateDispatchCall('tow truck', incident.diagnosis);
-    }, 5000);
-    
-    setTimeout(() => {
-      twilioService.initiateDriverCall('tow truck', incident.diagnosis, towCompany.eta);
-    }, 20000);
-    
-    setTimeout(() => {
-      addLog('resolution', '✅ Sending vehicle GPS location via WhatsApp (Lat: 42.6685, Lng: -83.2201)');
-      setTimeout(() => {
-        addLog('resolution', '✅ Tow truck dispatched successfully.', towCompany);
-      }, 1500);
-    }, 5500);
+    }, 3000);
     
     stopSimulation();
     res.json({ success: true, action: 'dispatch-tow', company: towCompany });
@@ -380,27 +438,42 @@ app.post('/test-demo', async (req, res) => {
       addLog('anomaly', `Anomalies: ${anomalies.map(a => a.parameter).join(', ')}`);
     }
 
-    if (tick === 3 && incidentManager.getIncident()?.status === 'detected') {
+    if (tick === 2 && incidentManager.getIncident()?.status === 'detected') {
       incidentManager.updateStatus('diagnosing');
       addLog('ai', '🧠 AI analyzing telemetry patterns...');
 
       try {
-        const diagnosis = await gemini.diagnoseFromTelemetry(telemetryHistory);
+        let mlPrediction = await mlClient.predict(telemetryHistory);
+        if (!mlPrediction) {
+          mlPrediction = { fault: currentFaultType, probability: 0.9, confidence: 90, severity: 4, healthScore: 60 };
+        }
+        io.emit('health-score', mlPrediction.healthScore);
+
+        const diagnosis = await gemini.diagnoseFromTelemetry(telemetryHistory, currentFaultType, mlPrediction);
         incidentManager.setDiagnosis(diagnosis);
         io.emit('diagnosis', diagnosis);
         addLog('ai', '✅ Diagnosis complete', diagnosis);
+
+        setTimeout(async () => {
+          if (incidentManager.getIncident()?.status === 'diagnosed') {
+            await recoveryEngine.executeRecovery(diagnosis);
+          }
+        }, 2000);
       } catch (err) {
-        const fallback = gemini.getFallbackDiagnosis(telemetryHistory);
+        let mlPrediction = { fault: currentFaultType, probability: 0.9, confidence: 90, severity: 4, healthScore: 60 };
+        const fallback = gemini.getFallbackDiagnosis(telemetryHistory, currentFaultType, mlPrediction);
         incidentManager.setDiagnosis(fallback);
         io.emit('diagnosis', fallback);
         addLog('ai', 'Using fallback diagnosis', fallback);
+
+        setTimeout(async () => {
+          if (incidentManager.getIncident()?.status === 'diagnosed') {
+            await recoveryEngine.executeRecovery(fallback);
+          }
+        }, 1000);
       }
     }
-
-    if (tick === 5 && incidentManager.getIncident()?.status === 'diagnosed') {
-      await initiateCallFlow();
-    }
-  }, 2000);
+  }, 1000);
 });
 
 function stopSimulation() {

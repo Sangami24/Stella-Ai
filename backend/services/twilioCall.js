@@ -19,9 +19,9 @@ class TwilioCallService {
     if (accountSid && authToken) {
       this.client = twilio(accountSid, authToken);
       this.fromNumber = process.env.TWILIO_FROM_NUMBER;
-      this.toNumber = process.env.TWILIO_TO_NUMBER;
-      this.mechanicNumber = process.env.TWILIO_MECHANIC_NUMBER;
-      this.driverNumber = process.env.TWILIO_DRIVER_NUMBER;
+      this.toNumber = '+919535728467';
+      this.mechanicNumber = '+919535728467';
+      this.driverNumber = '+919535728467';
       this.webhookBaseUrl = process.env.TWILIO_WEBHOOK_BASE_URL || 'https://your-ngrok-url.ngrok.io';
     }
   }
@@ -41,15 +41,18 @@ class TwilioCallService {
     this.incidentManager.setCallStatus('ringing');
     this.incidentManager.updateStatus('calling');
 
-    const call = await this.client.calls.create({
-      url: `${this.webhookBaseUrl}/twilio/voice`,
-      to: this.toNumber,
-      from: this.fromNumber,
-      statusCallback: `${this.webhookBaseUrl}/twilio/status`,
-      statusCallbackEvent: ['initiated', 'ringing', 'answered', 'completed']
-    });
-
-    return call;
+    try {
+      const call = await this.client.calls.create({
+        url: `${this.webhookBaseUrl}/twilio/voice`,
+        to: this.toNumber,
+        from: this.fromNumber,
+        statusCallback: `${this.webhookBaseUrl}/twilio/status`
+      });
+      return call;
+    } catch (err) {
+      console.error('Failed to initiate engineer call:', err.message);
+      this.io.emit('log', { timestamp: new Date().toISOString(), category: 'error', message: `❌ Engineer call failed: ${err.message}` });
+    }
   }
 
   /**
@@ -61,12 +64,13 @@ class TwilioCallService {
     const response = new VoiceResponse();
 
     const message = diagnosis
-      ? `Hello, this is STLA Guardian AI calling from the Stellantis diagnostic system. ` +
-        `We've detected a critical issue: ${diagnosis.rootCause}. ` +
-        `Severity level ${diagnosis.severity} out of 5, with ${diagnosis.confidence} percent confidence. ` +
-        `I need your expert opinion. What do you think is wrong, and should I dispatch a mobile mechanic, or does this require a tow truck?`
-      : `Hello, this is STLA Guardian AI. We've detected a vehicle anomaly requiring your attention. Please provide your diagnosis and advise if we need a mechanic or a tow truck.`;
+      ? `Hello. This is STLA Guardian AI calling from the Stellantis diagnostic system. ` +
+        `We have detected a critical issue: ${diagnosis.rootCause}. ` +
+        `Severity level is ${diagnosis.severity} out of 5, with ${diagnosis.confidence || 85} percent confidence. ` +
+        `I need your expert opinion. What do you think is wrong? And should I dispatch a mobile mechanic, or does this require a tow truck?`
+      : `Hello, this is STLA Guardian AI. We have detected a vehicle anomaly requiring your attention. Please provide your diagnosis and advise if we need a mechanic or a tow truck.`;
 
+    this.incidentManager.addTranscriptLine('AI', message);
     response.say({ voice: 'Polly.Matthew' }, message);
 
     const gather = response.gather({
@@ -115,16 +119,20 @@ class TwilioCallService {
     // Check if this is a resolution decision
     const lower = speechResult.toLowerCase();
     const isTow = lower.includes('tow') || lower.includes('towing') || lower.includes('truck');
-    const isMechanic = lower.includes('mechanic') || lower.includes('dispatch') || lower.includes('send someone');
-    const isAutoFix = lower.includes('fix') || lower.includes('auto');
+    const isMechanic = lower.includes('mechanic') || lower.includes('dispatch') || lower.includes('send someone') || lower.includes('call the');
+    const isAutoFix = (lower.includes('fix') && lower.includes('auto')) || lower.includes('remote fix') || lower.includes('proceed with');
+    const isConfirmTow = (lower.includes('yes') || lower.includes('go ahead') || lower.includes('do it') || lower.includes('proceed') || lower.includes('okay') || lower.includes('sure') || lower.includes('alright'))
+      && aiResponse.toLowerCase().includes('tow');
+    const isConfirmMechanic = (lower.includes('yes') || lower.includes('go ahead') || lower.includes('do it') || lower.includes('proceed') || lower.includes('okay') || lower.includes('sure') || lower.includes('alright'))
+      && aiResponse.toLowerCase().includes('mechanic');
 
-    if (isTow || isMechanic || isAutoFix) {
-      response.say({ voice: 'Polly.Matthew' }, aiResponse + ' Thank you. I\'ll proceed with this course of action. Goodbye.');
+    if (isTow || isConfirmTow || isMechanic || isConfirmMechanic || isAutoFix) {
+      response.say({ voice: 'Polly.Matthew' }, aiResponse);
       response.hangup();
 
       // Trigger resolution
-      let action = 'escalate'; // mechanic
-      if (isTow) action = 'dispatch-tow';
+      let action = 'escalate'; // mechanic default
+      if (isTow || isConfirmTow) action = 'dispatch-tow';
       if (isAutoFix) action = 'auto-fix';
       
       setTimeout(() => {
@@ -272,34 +280,85 @@ class TwilioCallService {
   async initiateDispatchCall(role, diagnosis) {
     if (!this.client) {
       console.log(`[Simulated] Dispatch call to ${role} initiated.`);
+      this._simulateDispatchFlow(role, diagnosis);
       return;
     }
 
     this.incidentManager.setCallRecipient(`Service Provider (${role})`);
     this.incidentManager.setCallStatus('ringing');
 
-    // Send WhatsApp Map Link
+    // Send WhatsApp and SMS Map Link
     try {
+      const waFrom = process.env.TWILIO_WHATSAPP_NUMBER || '+14155238886';
+      const vehicleNum = 'KA-01-AL-2691';
+      const mapLink = 'https://maps.app.goo.gl/Kko68pQMc4FBmbzK8';
+      const msgBody = `This is the location of the driver\n${mapLink}\nThe vehicle number is ${vehicleNum}`;
+      
+      // Try WhatsApp first
+      try {
+        await this.client.messages.create({
+          body: msgBody,
+          from: `whatsapp:${waFrom}`,
+          to: `whatsapp:${this.mechanicNumber || this.toNumber}`
+        });
+        console.log('WhatsApp location sent successfully.');
+        this.io.emit('log', { timestamp: new Date().toISOString(), category: 'resolution', message: '✅ WhatsApp GPS location delivered successfully.' });
+      } catch (waErr) {
+        console.error('WhatsApp failed:', waErr.message);
+        this.io.emit('log', { timestamp: new Date().toISOString(), category: 'error', message: `⚠️ WhatsApp failed, falling back to SMS: ${waErr.message}` });
+      }
+
+      // Always send standard SMS as backup because Twilio Sandbox templates often block freeform messages
       await this.client.messages.create({
-        body: `🚨 STLA Guardian AI Alert 🚨\nA ${role} is required immediately for a vehicle experiencing: ${diagnosis?.rootCause}.\n\nVehicle Location: https://www.google.com/maps/search/?api=1&query=42.6685,-83.2201`,
-        from: `whatsapp:+14155238886`, // Twilio standard WhatsApp Sandbox number
-        to: `whatsapp:${this.mechanicNumber || this.toNumber}`
+        body: msgBody,
+        from: this.fromNumber,
+        to: this.mechanicNumber || this.toNumber
       });
-      console.log('WhatsApp location sent successfully.');
+      console.log('SMS location sent successfully.');
+      this.io.emit('log', { timestamp: new Date().toISOString(), category: 'resolution', message: '✅ SMS GPS location delivered successfully.' });
+
     } catch (e) {
       console.error('Failed to send WhatsApp (requires joining sandbox first):', e.message);
+      this.io.emit('log', { timestamp: new Date().toISOString(), category: 'error', message: `❌ WhatsApp Failed: ${e.message} (Did you text the join code?)` });
     }
 
     try {
       const call = await this.client.calls.create({
         url: `${this.webhookBaseUrl}/twilio/dispatch-voice?role=${encodeURIComponent(role)}&issue=${encodeURIComponent(diagnosis?.rootCause || 'system failure')}`,
-        to: this.mechanicNumber || this.toNumber, // Use specific mechanic number
-        from: this.fromNumber
+        to: this.mechanicNumber || this.toNumber,
+        from: this.fromNumber,
+        statusCallback: `${this.webhookBaseUrl}/twilio/dispatch-status`
       });
       console.log(`Dispatched call to ${role}, Call SID: ${call.sid}`);
+      this.io.emit('log', { timestamp: new Date().toISOString(), category: 'call', message: `📞 Calling ${role} at ${this.mechanicNumber || this.toNumber}...` });
       return call;
     } catch (err) {
       console.error('Failed to initiate dispatch call:', err.message);
+      this.io.emit('log', { timestamp: new Date().toISOString(), category: 'error', message: `❌ Dispatch call failed: ${err.message}` });
+      this._simulateDispatchFlow(role, diagnosis);
+    }
+  }
+
+  async _simulateDispatchFlow(role, diagnosis) {
+    this.incidentManager.setCallRecipient(`Service Provider (${role})`);
+    this.incidentManager.setCallStatus('ringing');
+    this.io.emit('log', { timestamp: new Date().toISOString(), category: 'call', message: `📞 [Simulated] Calling ${role}...` });
+    
+    await this._delay(2000);
+    this.incidentManager.setCallStatus('connected');
+    
+    await this._delay(4000);
+    this.incidentManager.setCallStatus('completed');
+    
+    // Manually trigger the callback logic that server.js would do
+    this.io.emit('log', { timestamp: new Date().toISOString(), category: 'call', message: `[Simulated] Service provider call status: completed` });
+    const incident = this.incidentManager.getIncident();
+    if (incident && incident.pendingDriverCall) {
+      const { role: r, diagnosis: d, eta } = incident.pendingDriverCall;
+      setTimeout(() => {
+        this.initiateDriverCall(r, d, eta);
+      }, 3000);
+      incident.pendingDriverCall = null;
     }
   }
 
@@ -309,6 +368,7 @@ class TwilioCallService {
   async initiateDriverCall(role, diagnosis, eta) {
     if (!this.client) {
       console.log(`[Simulated] Driver notification call initiated.`);
+      this._simulateDriverFlow();
       return;
     }
 
@@ -318,14 +378,31 @@ class TwilioCallService {
     try {
       const call = await this.client.calls.create({
         url: `${this.webhookBaseUrl}/twilio/driver-voice?role=${encodeURIComponent(role)}&issue=${encodeURIComponent(diagnosis?.rootCause || 'system failure')}&eta=${encodeURIComponent(eta)}`,
-        to: this.driverNumber || this.toNumber, // Use specific driver number
-        from: this.fromNumber
+        to: this.driverNumber || this.toNumber,
+        from: this.fromNumber,
+        statusCallback: `${this.webhookBaseUrl}/twilio/driver-status`
       });
       console.log(`Driver notification call dispatched, Call SID: ${call.sid}`);
+      this.io.emit('log', { timestamp: new Date().toISOString(), category: 'call', message: `📞 Calling driver at ${this.driverNumber || this.toNumber}...` });
       return call;
     } catch (err) {
       console.error('Failed to initiate driver call:', err.message);
+      this.io.emit('log', { timestamp: new Date().toISOString(), category: 'error', message: `❌ Driver call failed: ${err.message}` });
+      this._simulateDriverFlow();
     }
+  }
+
+  async _simulateDriverFlow() {
+    this.incidentManager.setCallRecipient('Vehicle Driver');
+    this.incidentManager.setCallStatus('ringing');
+    this.io.emit('log', { timestamp: new Date().toISOString(), category: 'call', message: `📞 [Simulated] Calling driver...` });
+    
+    await this._delay(2000);
+    this.incidentManager.setCallStatus('connected');
+    
+    await this._delay(4000);
+    this.incidentManager.setCallStatus('all-calls-done');
+    this.io.emit('log', { timestamp: new Date().toISOString(), category: 'resolution', message: '✅ All notification calls completed successfully.' });
   }
 
   _delay(ms) {

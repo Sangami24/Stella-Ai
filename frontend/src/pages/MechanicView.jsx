@@ -36,23 +36,41 @@ export default function MechanicView() {
             <AlertTriangle className="w-6 h-6 text-yellow-400" />
           </div>
           <div>
-            <h2 className="font-display text-base tracking-wider text-yellow-400 font-bold">
-              MECHANIC DISPATCH REQUIRED
+            <h2 className={`font-display text-base tracking-wider ${incident?.pendingDriverCall?.role === 'tow truck' ? 'text-red-400' : 'text-green-400'} font-bold uppercase`}>
+              {incident?.pendingDriverCall?.role === 'tow truck' ? 'TOW TRUCK DISPATCHED' : 'MECHANIC DISPATCHED'}
             </h2>
             <p className="text-sm text-dash-text mt-1">
-              Remote auto-fix is not possible for this issue. A certified mechanic has been dispatched.
+              Remote auto-fix is not possible for this issue. The nearest {incident?.pendingDriverCall?.role || 'service provider'} has been dispatched and is reaching your location soon.
             </p>
             {diagnosis && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                <span className="px-2 py-1 text-[10px] rounded bg-dash-bg/50 text-dash-muted border border-dash-border">
-                  Issue: {diagnosis.affectedSystem}
-                </span>
-                <span className="px-2 py-1 text-[10px] rounded bg-dash-bg/50 text-dash-muted border border-dash-border">
-                  Severity: {diagnosis.severity}/5
-                </span>
-                <span className="px-2 py-1 text-[10px] rounded bg-dash-bg/50 text-dash-muted border border-dash-border">
-                  Root Cause: {diagnosis.rootCause}
-                </span>
+              <div className="mt-4 space-y-2">
+                <div className="text-sm font-semibold text-dash-text border-b border-dash-border pb-1">AI Final Prediction</div>
+                <div className="grid grid-cols-4 gap-4">
+                  <div>
+                    <span className="block text-[10px] text-dash-muted uppercase tracking-wider">Affected System</span>
+                    <span className="text-sm text-dash-text">{diagnosis.affectedSystem}</span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] text-dash-muted uppercase tracking-wider">ML Confidence</span>
+                    <span className="text-sm text-dash-accent font-bold">{diagnosis.primaryConfidence}%</span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] text-dash-muted uppercase tracking-wider">AI Confidence</span>
+                    <span className="text-sm text-purple-400 font-bold">{diagnosis.contextualConfidence}%</span>
+                  </div>
+                  <div>
+                    <span className="block text-[10px] text-dash-muted uppercase tracking-wider">Severity</span>
+                    <span className="text-sm text-dash-danger font-bold">{diagnosis.severity} / 5</span>
+                  </div>
+                </div>
+                <div>
+                  <span className="block text-[10px] text-dash-muted uppercase tracking-wider mt-2">Identified Root Cause</span>
+                  <span className="text-sm text-dash-text">{diagnosis.rootCause}</span>
+                </div>
+                <div>
+                  <span className="block text-[10px] text-dash-muted uppercase tracking-wider mt-2">Recommended Solution</span>
+                  <span className="text-sm text-dash-success">{diagnosis.recommendedAction}</span>
+                </div>
               </div>
             )}
           </div>

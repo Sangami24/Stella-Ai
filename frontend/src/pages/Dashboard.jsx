@@ -44,12 +44,12 @@ export default function Dashboard() {
   const activeFault = useStore((s) => s.activeFault);
   const simulateFault = async (type) => {
     await useStore.getState().simulateFault(type);
-    useStore.getState().setActiveTab('voice');
   };
   const startDemo = useStore((s) => s.startDemo);
   const resetDemo = useStore((s) => s.resetDemo);
   const isDemoRunning = useStore((s) => s.isDemoRunning);
   const isSimulating = useStore((s) => s.isSimulating);
+  const recoveryProgress = useStore((s) => s.recoveryProgress);
 
   // Default/baseline telemetry
   const t = telemetry || {
@@ -68,7 +68,7 @@ export default function Dashboard() {
           <h2 className="font-display text-sm tracking-wider text-dash-text font-semibold">
             VEHICLE INSTRUMENT CLUSTER
           </h2>
-          {activeFault && (
+          {activeFault && incident?.status !== 'resolving' && (
             <motion.span
               initial={{ scale: 0 }}
               animate={{ scale: 1 }}
@@ -77,6 +77,24 @@ export default function Dashboard() {
               <AlertTriangle className="w-3 h-3 inline mr-1" />
               FAULT ACTIVE: {activeFault.toUpperCase()}
             </motion.span>
+          )}
+          {incident?.status === 'resolving' && recoveryProgress && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              className="ml-auto flex flex-col gap-1 min-w-[200px]"
+            >
+              <div className="flex justify-between text-xs text-green-400 font-semibold tracking-wider">
+                <span>{recoveryProgress.step}</span>
+                <span>{recoveryProgress.progress}%</span>
+              </div>
+              <div className="h-1.5 w-full bg-dash-bg rounded-full overflow-hidden border border-dash-border">
+                <div 
+                  className="h-full bg-green-500 transition-all duration-500 ease-out" 
+                  style={{ width: `${recoveryProgress.progress}%` }} 
+                />
+              </div>
+            </motion.div>
           )}
         </div>
 
