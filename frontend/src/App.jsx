@@ -11,9 +11,7 @@ import Timeline from './pages/Timeline';
 import VoicePanel from './pages/VoicePanel';
 import MechanicView from './pages/MechanicView';
 import SystemLogs from './pages/SystemLogs';
-
 const SOCKET_URL = 'http://localhost:3001';
-
 const tabs = [
   { id: 'dashboard', label: 'Dashboard', icon: Gauge },
   { id: 'timeline', label: 'Timeline', icon: Activity },
@@ -21,79 +19,61 @@ const tabs = [
   { id: 'mechanics', label: 'Mechanics', icon: MapPin },
   { id: 'logs', label: 'System Logs', icon: Terminal },
 ];
-
 function App() {
   const activeTab = useStore((s) => s.activeTab);
   const setActiveTab = useStore((s) => s.setActiveTab);
   const healthScore = useStore((s) => s.healthScore);
   const incident = useStore((s) => s.incident);
-
   useEffect(() => {
     const socket = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
     });
-
     socket.on('connect', () => {
-      console.log('🔌 Connected to STLA Guardian backend');
     });
-
     socket.on('telemetry', (reading) => {
       useStore.getState().updateTelemetry(reading);
     });
-
     socket.on('telemetry-history', (history) => {
       if (history && history.length > 0) {
         history.forEach((r) => useStore.getState().updateTelemetry(r));
       }
     });
-
     socket.on('anomalies', (anomalies) => {
       useStore.getState().setAnomalies(anomalies);
     });
-
     socket.on('incident', (incident) => {
       useStore.getState().updateIncident(incident);
     });
-
     socket.on('diagnosis', (diagnosis) => {
       useStore.getState().setDiagnosis(diagnosis);
     });
-
     socket.on('health-score', (score) => {
       useStore.getState().setHealthScore(score);
     });
-
     socket.on('recovery-progress', (progress) => {
       useStore.getState().setRecoveryProgress(progress);
     });
-
     socket.on('call-status', (status) => {
       useStore.getState().setCallStatus(status);
     });
-
     socket.on('transcript', (line) => {
       useStore.getState().addTranscriptLine(line);
     });
-
     socket.on('mechanics', (mechanics) => {
       useStore.getState().setMechanics(mechanics);
     });
-
     socket.on('log', (log) => {
       useStore.getState().addLog(log);
     });
-
     socket.on('logs-history', (logs) => {
       if (logs) useStore.getState().setLogsHistory(logs);
     });
-
     socket.on('resolution-decision', async (data) => {
       await useStore.getState().triggerResolve(data.action);
       if (data.action === 'escalate' || data.action === 'dispatch-tow') {
         useStore.getState().setActiveTab('mechanics');
       }
     });
-
     socket.on('reset', () => {
       useStore.setState({
         telemetry: null,
@@ -110,11 +90,8 @@ function App() {
         isDemoRunning: false,
       });
     });
-
     return () => socket.disconnect();
   }, []);
-
-  // Auto-switch to relevant tabs based on incident state
   useEffect(() => {
     if (!incident) return;
     const status = incident.status;
@@ -124,7 +101,6 @@ function App() {
       setActiveTab('mechanics');
     }
   }, [incident?.status]);
-
   const getStatusColor = () => {
     if (!incident) return 'text-dash-success';
     const status = incident.status;
@@ -133,7 +109,6 @@ function App() {
     if (['detected', 'diagnosing'].includes(status)) return 'text-dash-danger';
     return 'text-dash-warning';
   };
-
   const getStatusText = () => {
     if (!incident) return 'ALL SYSTEMS NOMINAL';
     const map = {
@@ -148,7 +123,6 @@ function App() {
     };
     return map[incident.status] || incident.status.toUpperCase();
   };
-
   const renderPage = () => {
     switch (activeTab) {
       case 'dashboard': return <Dashboard />;
@@ -159,13 +133,12 @@ function App() {
       default: return <Dashboard />;
     }
   };
-
   return (
     <div className="min-h-screen bg-dash-bg bg-grid">
-      {/* ── Header ────────────────────────────────────── */}
+      {}
       <header className="glass sticky top-0 z-50 px-6 py-3">
         <div className="max-w-[1600px] mx-auto flex items-center justify-between">
-          {/* Logo */}
+          {}
           <div className="flex items-center gap-3">
             <div className="relative">
               <Shield className="w-8 h-8 text-dash-accent" />
@@ -173,15 +146,14 @@ function App() {
             </div>
             <div>
               <h1 className="font-display text-lg font-bold tracking-wider text-white">
-                STLA GUARDIAN
+                STELLA AI
               </h1>
               <p className="text-[10px] text-dash-muted tracking-[0.2em] uppercase">
                 AI Diagnostics Platform
               </p>
             </div>
           </div>
-
-          {/* Status Badge */}
+          {}
           <motion.div
             key={getStatusText()}
             initial={{ scale: 0.9, opacity: 0 }}
@@ -198,9 +170,8 @@ function App() {
               {getStatusText()}
             </span>
           </motion.div>
-
           <div className="flex items-center gap-4">
-            {/* Health Score */}
+            {}
             <div className="flex items-center gap-2 px-3 py-1 bg-dash-bg/50 border border-dash-border rounded-lg">
               <span className="text-[10px] text-dash-muted uppercase tracking-wider">Health Score</span>
               <span className={`text-sm font-bold ${
@@ -208,8 +179,7 @@ function App() {
                 healthScore >= 70 ? 'text-yellow-400' : 'text-red-400'
               }`}>{healthScore}</span>
             </div>
-
-            {/* Team Badge */}
+            {}
             <div className="flex items-center gap-2 text-dash-muted text-xs">
               <span className="font-display tracking-wider">TEAM FALCONS</span>
               <span className="text-dash-border">|</span>
@@ -218,8 +188,7 @@ function App() {
           </div>
         </div>
       </header>
-
-      {/* ── Navigation ────────────────────────────────── */}
+      {}
       <nav className="glass border-t-0 px-6 py-2">
         <div className="max-w-[1600px] mx-auto flex items-center gap-1">
           {tabs.map((tab) => {
@@ -229,7 +198,6 @@ function App() {
               (tab.id === 'voice' && (incident?.status === 'calling' || incident?.status === 'in_call')) ||
               (tab.id === 'mechanics' && incident?.status === 'escalated') ||
               (tab.id === 'timeline' && incident && incident.status !== 'resolved');
-
             return (
               <button
                 key={tab.id}
@@ -250,8 +218,7 @@ function App() {
           })}
         </div>
       </nav>
-
-      {/* ── Main Content ──────────────────────────────── */}
+      {}
       <main className="max-w-[1600px] mx-auto px-6 py-6">
         <AnimatePresence mode="wait">
           <motion.div
@@ -268,5 +235,4 @@ function App() {
     </div>
   );
 }
-
 export default App;

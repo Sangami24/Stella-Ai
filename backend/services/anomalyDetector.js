@@ -1,10 +1,5 @@
-/**
- * Anomaly Detector — threshold-based detection on raw telemetry readings.
- * Returns a list of anomalous parameters with severity scores.
- */
 class AnomalyDetector {
   constructor() {
-    // Thresholds: [warningLow, warningHigh, criticalLow, criticalHigh]
     this.thresholds = {
       rpm:              [600, 1200, 400, 5000],
       oilPressure:      [25, 60, 15, 80],
@@ -17,7 +12,6 @@ class AnomalyDetector {
       coolantFlowRate:  [5, 12, 3, 15],
       vibration:        [0, 1.5, 0, 3.0],
     };
-
     this.units = {
       rpm: 'RPM',
       oilPressure: 'psi',
@@ -31,21 +25,13 @@ class AnomalyDetector {
       vibration: 'g',
     };
   }
-
-  /**
-   * Detect anomalies in a single telemetry reading.
-   * Returns array of { parameter, value, severity, message }
-   */
   detect(reading) {
     const anomalies = [];
-
     for (const [param, [wLow, wHigh, cLow, cHigh]] of Object.entries(this.thresholds)) {
       const value = reading[param];
       if (value === undefined) continue;
-
       let severity = null;
       let message = '';
-
       if (value <= cLow) {
         severity = 'critical';
         message = `${param} critically low: ${value} ${this.units[param]} (threshold: ${cLow})`;
@@ -59,7 +45,6 @@ class AnomalyDetector {
         severity = 'warning';
         message = `${param} above normal: ${value} ${this.units[param]} (threshold: ${wHigh})`;
       }
-
       if (severity) {
         anomalies.push({
           parameter: param,
@@ -71,9 +56,7 @@ class AnomalyDetector {
         });
       }
     }
-
     return anomalies;
   }
 }
-
 module.exports = { AnomalyDetector };

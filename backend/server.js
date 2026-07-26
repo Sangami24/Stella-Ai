@@ -3,7 +3,6 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const cors = require('cors');
-
 const { SimulatorService } = require('./services/simulator');
 const { AnomalyDetector } = require('./services/anomalyDetector');
 const { IncidentManager } = require('./services/incidentManager');
@@ -11,32 +10,25 @@ const { GeminiDiagnosis } = require('./services/geminiDiagnosis');
 const { TwilioCallService } = require('./services/twilioCall');
 const mlClient = require('./services/mlClient');
 const RecoveryEngine = require('./services/recoveryEngine');
-
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] }
 });
-
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-
-// ── Services ──────────────────────────────────────────────
 const simulator = new SimulatorService();
 const anomalyDetector = new AnomalyDetector();
 const incidentManager = new IncidentManager(io);
 const gemini = new GeminiDiagnosis();
 const twilioService = new TwilioCallService(io, incidentManager);
 const recoveryEngine = new RecoveryEngine(incidentManager, io, twilioService);
-
-// ── Telemetry state ───────────────────────────────────────
 let telemetryHistory = [];
 let telemetryInterval = null;
 let currentFaultType = null;
 let demoMode = false;
 let systemLogs = [];
-
 function addLog(category, message, data = null) {
   const entry = {
     timestamp: new Date().toISOString(),
@@ -48,67 +40,44 @@ function addLog(category, message, data = null) {
   if (systemLogs.length > 500) systemLogs = systemLogs.slice(-500);
   io.emit('log', entry);
 }
-
-// ── Socket.IO ─────────────────────────────────────────────
 io.on('connection', (socket) => {
   addLog('system', 'Dashboard client connected');
-  // Send current state on connect
   socket.emit('telemetry-history', telemetryHistory.slice(-30));
   socket.emit('incident', incidentManager.getIncident());
   socket.emit('logs-history', systemLogs.slice(-100));
 });
-
-// ── API Routes ────────────────────────────────────────────
-
-// POST /simulate-fault — Start a fault simulation
 app.post('/simulate-fault', async (req, res) => {
-  const { type } = req.body; // engine | electrical | coolant
+  const { type } = req.body; 
   if (!['engine', 'electrical', 'coolant'].includes(type)) {
     return res.status(400).json({ error: 'Invalid fault type. Use: engine, electrical, coolant' });
   }
-
-  // Clear any existing simulation
   stopSimulation();
-
   currentFaultType = type;
   telemetryHistory = [];
   addLog('telemetry', `Fault simulation started: ${type}`);
-
-  // Create initial incident
   incidentManager.createIncident(type);
-
-  // Start telemetry streaming every 1 second for faster demo
   let tick = 0;
   telemetryInterval = setInterval(async () => {
     tick++;
     const reading = simulator.generateReading(type, tick);
     telemetryHistory.push(reading);
     if (telemetryHistory.length > 100) telemetryHistory.shift();
-
     io.emit('telemetry', reading);
     addLog('telemetry', `Sensor reading #${tick}`, reading);
-
-    // Run anomaly detection
     const anomalies = anomalyDetector.detect(reading);
     if (anomalies.length > 0) {
       io.emit('anomalies', anomalies);
       addLog('anomaly', `Anomalies detected: ${anomalies.map(a => a.parameter).join(', ')}`, anomalies);
-
-      // Auto-trigger diagnosis after enough anomalous readings (tick >= 2)
       if (tick >= 2 && incidentManager.getIncident()?.status === 'detected') {
         incidentManager.updateStatus('diagnosing');
         addLog('ai', 'Triggering ML Edge Analytics Engine...');
-
         setTimeout(async () => {
           try {
-            // 1. Edge Analytics (Primary ML Confidence)
             let mlPrediction = await mlClient.predict(telemetryHistory);
-            
             if (mlPrediction) {
               addLog('ai', 'ML Prediction Received', mlPrediction);
               io.emit('health-score', mlPrediction.healthScore);
             } else {
-              // Fallback if Python ML is down
               mlPrediction = {
                 fault: currentFaultType,
                 probability: 0.9,
@@ -118,25 +87,18 @@ app.post('/simulate-fault', async (req, res) => {
               };
               io.emit('health-score', 60);
             }
-
-            // Threshold Logic
             if (mlPrediction.confidence < 60) {
               addLog('system', 'Confidence < 60%. Continuing to monitor.');
-              incidentManager.updateStatus('detected'); // revert
+              incidentManager.updateStatus('detected'); 
               return;
             } else if (mlPrediction.confidence < 75) {
               addLog('system', 'Warning threshold reached. Monitoring closely.');
             }
-
-            // 2. Gemini Contextual AI (Secondary Confidence)
             addLog('ai', 'Triggering Gemini Contextual Reasoning...');
             const diagnosis = await gemini.diagnoseFromTelemetry(telemetryHistory, currentFaultType, mlPrediction);
-            
             incidentManager.setDiagnosis(diagnosis);
             addLog('ai', 'Diagnosis complete', diagnosis);
             io.emit('diagnosis', diagnosis);
-
-            // Trigger Recovery Engine
             setTimeout(async () => {
               if (incidentManager.getIncident()?.status === 'diagnosed') {
                 await recoveryEngine.executeRecovery(diagnosis);
@@ -144,12 +106,10 @@ app.post('/simulate-fault', async (req, res) => {
             }, 2000);
           } catch (err) {
             addLog('error', `Diagnosis failed: ${err.message}`);
-            // Use fallback diagnosis
             const fallback = gemini.getFallbackDiagnosis(telemetryHistory, currentFaultType, mlPrediction);
             incidentManager.setDiagnosis(fallback);
             io.emit('diagnosis', fallback);
             addLog('ai', 'Using fallback diagnosis', fallback);
-            // Trigger Recovery Engine on fallback
             setTimeout(async () => {
               if (incidentManager.getIncident()?.status === 'diagnosed') {
                 await recoveryEngine.executeRecovery(fallback);
@@ -160,11 +120,8 @@ app.post('/simulate-fault', async (req, res) => {
       }
     }
   }, 1000);
-
   res.json({ success: true, faultType: type, message: `Simulation started for ${type} fault` });
 });
-
-// GET /telemetry/stream — Current telemetry snapshot
 app.get('/telemetry/stream', (req, res) => {
   res.json({
     current: telemetryHistory[telemetryHistory.length - 1] || null,
@@ -172,13 +129,10 @@ app.get('/telemetry/stream', (req, res) => {
     faultType: currentFaultType
   });
 });
-
-// POST /diagnose — Manual diagnosis trigger
 app.post('/diagnose', async (req, res) => {
   if (telemetryHistory.length === 0) {
     return res.status(400).json({ error: 'No telemetry data available' });
   }
-
   incidentManager.updateStatus('diagnosing');
   try {
     const diagnosis = await gemini.diagnoseFromTelemetry(telemetryHistory);
@@ -194,62 +148,45 @@ app.post('/diagnose', async (req, res) => {
     res.json(fallback);
   }
 });
-
-// POST /call-engineer — Initiate Twilio call
 app.post('/call-engineer', async (req, res) => {
   await initiateCallFlow();
   res.json({ success: true, message: 'Call initiated' });
 });
-
 async function initiateCallFlow() {
   incidentManager.updateStatus('calling');
   addLog('call', 'Initiating call to on-call engineer...');
-
   const incident = incidentManager.getIncident();
   const diagnosis = incident?.diagnosis;
-
   try {
     await twilioService.initiateCall(diagnosis, telemetryHistory);
     addLog('call', 'Call connected');
   } catch (err) {
     addLog('call', `Twilio call failed, using simulated call: ${err.message}`);
-    // Run simulated call
     await twilioService.simulateCall(diagnosis, telemetryHistory);
   }
 }
-
-// POST /twilio/voice — TwiML webhook for initial voice
 app.post('/twilio/voice', (req, res) => {
   const twiml = twilioService.generateInitialTwiML();
   res.type('text/xml');
   res.send(twiml);
 });
-
-// POST /twilio/gather — Handle engineer speech input
 app.post('/twilio/gather', async (req, res) => {
   const speechResult = req.body.SpeechResult;
   addLog('call', `Engineer said: ${speechResult}`);
-
   const twiml = await twilioService.handleEngineerSpeech(speechResult);
   res.type('text/xml');
   res.send(twiml);
 });
-
-// POST /twilio/status — Call status callback (engineer call)
 app.post('/twilio/status', (req, res) => {
   const status = req.body.CallStatus;
   addLog('call', `Engineer call status: ${status}`);
   twilioService.handleCallStatus(status);
   res.sendStatus(200);
 });
-
-// POST /twilio/dispatch-status — Status callback for mechanic/tow call
 app.post('/twilio/dispatch-status', (req, res) => {
   const status = req.body.CallStatus;
   addLog('call', `Service provider call status: ${status}`);
-
   if (status === 'completed' || status === 'busy' || status === 'no-answer' || status === 'failed') {
-    // Mechanic/tow call is done — NOW call the driver
     const incident = incidentManager.getIncident();
     if (incident && incident.pendingDriverCall) {
       const { role, diagnosis, eta } = incident.pendingDriverCall;
@@ -257,13 +194,11 @@ app.post('/twilio/dispatch-status', (req, res) => {
       setTimeout(() => {
         twilioService.initiateDriverCall(role, diagnosis, eta);
       }, 3000);
-      incident.pendingDriverCall = null; // Clear it
+      incident.pendingDriverCall = null; 
     }
   }
   res.sendStatus(200);
 });
-
-// POST /twilio/driver-status — Status callback for driver call
 app.post('/twilio/driver-status', (req, res) => {
   const status = req.body.CallStatus;
   addLog('call', `Driver call status: ${status}`);
@@ -273,57 +208,44 @@ app.post('/twilio/driver-status', (req, res) => {
   }
   res.sendStatus(200);
 });
-
-// POST /twilio/dispatch-voice — TwiML for the one-sided dispatch call
 app.post('/twilio/dispatch-voice', (req, res) => {
   const role = req.query.role || 'service provider';
   const issue = req.query.issue || 'system failure';
   const twilio = require('twilio');
   const response = new twilio.twiml.VoiceResponse();
-  
   response.say({ voice: 'Polly.Matthew' }, 
-    `Alert from STLA Guardian AI. A vehicle requires a ${role}. ` +
+    `Alert from Stella AI. A vehicle requires a ${role}. ` +
     `The reported issue is: ${issue}. ` +
     `A WhatsApp message containing the vehicle's exact Google Maps location has been sent to your device. ` +
     `Please proceed immediately. End of message.`
   );
   response.hangup();
-  
   res.type('text/xml');
   res.send(response.toString());
 });
-
-// POST /twilio/driver-voice — TwiML for the one-sided driver notification
 app.post('/twilio/driver-voice', (req, res) => {
   const role = req.query.role || 'service provider';
   const issue = req.query.issue || 'system failure';
   const eta = req.query.eta || 'shortly';
   const twilio = require('twilio');
   const response = new twilio.twiml.VoiceResponse();
-  
   response.say({ voice: 'Polly.Matthew' }, 
-    `Hello, this is STLA Guardian AI. ` +
+    `Hello, this is Stella AI. ` +
     `The vehicle has experienced issues regarding: ${issue}. ` +
     `This has been confirmed by our remote engineer. ` +
     `A ${role} has been dispatched and is coming to your location. ` +
     `Their estimated time of arrival is ${eta}. Please stay with the vehicle.`
   );
   response.hangup();
-  
   res.type('text/xml');
   res.send(response.toString());
 });
-
-// POST /resolve — Trigger resolution
 app.post('/resolve', async (req, res) => {
-  const { action } = req.body; // 'auto-fix' or 'escalate'
+  const { action } = req.body; 
   const incident = incidentManager.getIncident();
-
   if (action === 'auto-fix') {
     incidentManager.updateStatus('resolving');
     addLog('resolution', 'Auto-fix initiated, normalizing telemetry...');
-
-    // Gradually normalize telemetry
     let normTick = 0;
     const normInterval = setInterval(() => {
       normTick++;
@@ -331,7 +253,6 @@ app.post('/resolve', async (req, res) => {
       telemetryHistory.push(reading);
       io.emit('telemetry', reading);
       addLog('telemetry', `Recovery reading #${normTick}`, reading);
-
       if (normTick >= 4) {
         clearInterval(normInterval);
         incidentManager.updateStatus('resolved');
@@ -339,7 +260,6 @@ app.post('/resolve', async (req, res) => {
         stopSimulation();
       }
     }, 1500);
-
     res.json({ success: true, action: 'auto-fix', message: 'Auto-fix in progress' });
   } else if (action === 'escalate') {
     incidentManager.updateStatus('escalated');
@@ -347,16 +267,11 @@ app.post('/resolve', async (req, res) => {
     incidentManager.setMechanics(mechanics);
     io.emit('mechanics', mechanics);
     addLog('resolution', 'Escalated to field mechanic', mechanics);
-    
-    // Store the pending driver call — it will fire when dispatch-status says mechanic call completed
     const inc = incidentManager.getIncident();
     inc.pendingDriverCall = { role: 'mechanic', diagnosis: incident.diagnosis, eta: mechanics[0].eta };
-    
-    // Wait 3s for Engineer call to disconnect, then call Mechanic
     setTimeout(() => {
       twilioService.initiateDispatchCall('mechanic', incident.diagnosis);
     }, 3000);
-    
     stopSimulation();
     res.json({ success: true, action: 'escalate', mechanics });
   } else if (action === 'dispatch-tow') {
@@ -373,31 +288,21 @@ app.post('/resolve', async (req, res) => {
     };
     incidentManager.setMechanics([towCompany]);
     io.emit('mechanics', [towCompany]);
-    
     addLog('resolution', 'Contacting nearest Tow Company...', towCompany);
-    
-    // Store the pending driver call — it will fire when dispatch-status says tow call completed
     const inc2 = incidentManager.getIncident();
     inc2.pendingDriverCall = { role: 'tow truck', diagnosis: incident.diagnosis, eta: towCompany.eta };
-    
-    // Wait 3s for Engineer call to disconnect, then call Tow Truck
     setTimeout(() => {
       twilioService.initiateDispatchCall('tow truck', incident.diagnosis);
     }, 3000);
-    
     stopSimulation();
     res.json({ success: true, action: 'dispatch-tow', company: towCompany });
   } else {
     res.status(400).json({ error: 'Invalid action. Use: auto-fix, escalate, or dispatch-tow' });
   }
 });
-
-// GET /incident — Current incident state
 app.get('/incident', (req, res) => {
   res.json(incidentManager.getIncident());
 });
-
-// POST /reset — Reset everything
 app.post('/reset', (req, res) => {
   stopSimulation();
   telemetryHistory = [];
@@ -409,21 +314,14 @@ app.post('/reset', (req, res) => {
   addLog('system', 'System reset complete');
   res.json({ success: true, message: 'System reset' });
 });
-
-// POST /test-demo — Scripted demo flow
 app.post('/test-demo', async (req, res) => {
   demoMode = true;
   res.json({ success: true, message: 'Demo started' });
-
-  // The demo just triggers a coolant fault — the rest flows automatically
-  // We simulate a POST to /simulate-fault
   stopSimulation();
   telemetryHistory = [];
   currentFaultType = 'coolant';
   addLog('demo', '🎬 Test Demo started — Coolant System Breakdown scenario');
-
   incidentManager.createIncident('coolant');
-
   let tick = 0;
   telemetryInterval = setInterval(async () => {
     tick++;
@@ -431,29 +329,24 @@ app.post('/test-demo', async (req, res) => {
     telemetryHistory.push(reading);
     io.emit('telemetry', reading);
     addLog('telemetry', `Sensor reading #${tick}`, reading);
-
     const anomalies = anomalyDetector.detect(reading);
     if (anomalies.length > 0) {
       io.emit('anomalies', anomalies);
       addLog('anomaly', `Anomalies: ${anomalies.map(a => a.parameter).join(', ')}`);
     }
-
     if (tick === 2 && incidentManager.getIncident()?.status === 'detected') {
       incidentManager.updateStatus('diagnosing');
       addLog('ai', '🧠 AI analyzing telemetry patterns...');
-
       try {
         let mlPrediction = await mlClient.predict(telemetryHistory);
         if (!mlPrediction) {
           mlPrediction = { fault: currentFaultType, probability: 0.9, confidence: 90, severity: 4, healthScore: 60 };
         }
         io.emit('health-score', mlPrediction.healthScore);
-
         const diagnosis = await gemini.diagnoseFromTelemetry(telemetryHistory, currentFaultType, mlPrediction);
         incidentManager.setDiagnosis(diagnosis);
         io.emit('diagnosis', diagnosis);
         addLog('ai', '✅ Diagnosis complete', diagnosis);
-
         setTimeout(async () => {
           if (incidentManager.getIncident()?.status === 'diagnosed') {
             await recoveryEngine.executeRecovery(diagnosis);
@@ -465,7 +358,6 @@ app.post('/test-demo', async (req, res) => {
         incidentManager.setDiagnosis(fallback);
         io.emit('diagnosis', fallback);
         addLog('ai', 'Using fallback diagnosis', fallback);
-
         setTimeout(async () => {
           if (incidentManager.getIncident()?.status === 'diagnosed') {
             await recoveryEngine.executeRecovery(fallback);
@@ -475,14 +367,12 @@ app.post('/test-demo', async (req, res) => {
     }
   }, 1000);
 });
-
 function stopSimulation() {
   if (telemetryInterval) {
     clearInterval(telemetryInterval);
     telemetryInterval = null;
   }
 }
-
 function getMechanicsList() {
   return [
     {
@@ -527,14 +417,9 @@ function getMechanicsList() {
     }
   ];
 }
-
-// ── Start Server ──────────────────────────────────────────
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`\n🛡️  STLA Guardian AI — Backend running on port ${PORT}`);
-  console.log(`   Gemini API: ${process.env.GEMINI_API_KEY ? '✅ Configured' : '⚠️  Not configured (using fallback)'}`);
-  console.log(`   Twilio: ${process.env.TWILIO_ACCOUNT_SID ? '✅ Configured' : '⚠️  Not configured (simulated calls)'}`);
-  console.log('');
+'}`);
+'}`);
 });
-
 module.exports = { app, server, io };

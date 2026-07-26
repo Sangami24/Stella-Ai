@@ -2,7 +2,6 @@ import React, { useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Terminal, AlertTriangle, Info, Zap, Radio, Trash2 } from 'lucide-react';
 import useStore from '../store/useStore';
-
 const categoryIcons = {
   telemetry: Radio,
   anomaly: AlertTriangle,
@@ -13,7 +12,6 @@ const categoryIcons = {
   demo: Info,
   error: AlertTriangle,
 };
-
 const categoryColors = {
   telemetry: 'text-cyan-400',
   anomaly: 'text-yellow-400',
@@ -24,30 +22,23 @@ const categoryColors = {
   demo: 'text-purple-400',
   error: 'text-red-400',
 };
-
 export default function SystemLogs() {
   const logs = useStore((s) => s.logs);
   const logsEndRef = useRef(null);
   const containerRef = useRef(null);
-
   useEffect(() => {
     if (containerRef.current) {
       const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
-      // Auto-scroll only if user is near the bottom
       if (scrollHeight - scrollTop - clientHeight < 150) {
         logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
       }
     }
   }, [logs]);
-
   const [filter, setFilter] = React.useState('all');
-
   const filteredLogs = filter === 'all'
     ? logs
     : logs.filter(l => l.category === filter);
-
   const filters = ['all', 'telemetry', 'anomaly', 'ai', 'call', 'resolution', 'system'];
-
   return (
     <div className="glass-card p-6">
       <div className="flex items-center justify-between mb-4">
@@ -61,8 +52,7 @@ export default function SystemLogs() {
           </span>
         </div>
       </div>
-
-      {/* Filters */}
+      {}
       <div className="flex flex-wrap gap-1 mb-4">
         {filters.map((f) => (
           <button
@@ -78,8 +68,7 @@ export default function SystemLogs() {
           </button>
         ))}
       </div>
-
-      {/* Log Stream */}
+      {}
       <div
         ref={containerRef}
         className="terminal bg-[#080c14] rounded-lg p-4 h-[500px] overflow-y-auto border border-dash-border/30"
@@ -93,7 +82,6 @@ export default function SystemLogs() {
             {filteredLogs.map((log, i) => {
               const Icon = categoryIcons[log.category] || Info;
               const color = categoryColors[log.category] || 'text-dash-muted';
-
               return (
                 <motion.div
                   key={`${log.timestamp}-${i}`}
@@ -101,7 +89,7 @@ export default function SystemLogs() {
                   animate={{ opacity: 1, height: 'auto' }}
                   className="terminal-line flex items-start gap-2 py-1 hover:bg-white/[0.02] px-2 rounded group"
                 >
-                  {/* Timestamp */}
+                  {}
                   <span className="text-dash-muted/50 flex-shrink-0 text-[11px]">
                     {new Date(log.timestamp).toLocaleTimeString('en-US', {
                       hour12: false,
@@ -110,19 +98,16 @@ export default function SystemLogs() {
                       second: '2-digit',
                     })}
                   </span>
-
-                  {/* Category */}
+                  {}
                   <span className={`flex-shrink-0 text-[11px] w-20 ${color} uppercase font-semibold flex items-center gap-1`}>
                     <Icon className="w-3 h-3" />
                     {log.category}
                   </span>
-
-                  {/* Message */}
+                  {}
                   <span className="text-dash-text/80 text-[12px] flex-1">
                     {log.message}
                   </span>
-
-                  {/* Expandable data */}
+                  {}
                   {log.data && (
                     <details className="text-[10px] text-dash-muted/50 cursor-pointer group-hover:text-dash-muted">
                       <summary className="select-none">data</summary>

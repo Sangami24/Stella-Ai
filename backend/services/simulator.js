@@ -1,40 +1,29 @@
-/**
- * Telemetry Simulator — generates realistic sensor data for 3 fault types.
- * Each fault produces a distinct telemetry signature that Gemini must diagnose
- * without being told the fault type.
- */
 class SimulatorService {
   constructor() {
     this.baselineValues = {
       rpm: 800,
-      oilPressure: 40,        // psi
-      engineTemp: 90,          // °C (engine temp, not coolant)
-      voltage: 14.2,           // V
-      current: 25,             // A
-      batterySoc: 95,          // %
-      coolantTemp: 88,         // °C
-      coolantPressure: 15,     // psi
-      coolantFlowRate: 8.5,    // L/min
-      speed: 60,               // km/h
-      vibration: 0.3,          // g
-      throttle: 30,            // %
-      tirePressure: 32,        // psi
-      brakeTemp: 150,          // °C
-      fuelPressure: 45,        // psi
-      canErrorCount: 0,        // count
+      oilPressure: 40,        
+      engineTemp: 90,          
+      voltage: 14.2,           
+      current: 25,             
+      batterySoc: 95,          
+      coolantTemp: 88,         
+      coolantPressure: 15,     
+      coolantFlowRate: 8.5,    
+      speed: 60,               
+      vibration: 0.3,          
+      throttle: 30,            
+      tirePressure: 32,        
+      brakeTemp: 150,          
+      fuelPressure: 45,        
+      canErrorCount: 0,        
       gpsCoordinates: '12.9716, 77.5946'
     };
   }
-
-  /**
-   * Generate a telemetry reading based on fault type and tick number.
-   * The tick number controls progression severity.
-   */
   generateReading(faultType, tick) {
-    const noise = () => (Math.random() - 0.5) * 2; // ±1
+    const noise = () => (Math.random() - 0.5) * 2; 
     const base = { ...this.baselineValues };
     const timestamp = new Date().toISOString();
-
     switch (faultType) {
       case 'engine':
         return this._engineFault(base, tick, noise, timestamp);
@@ -46,17 +35,8 @@ class SimulatorService {
         return { ...base, timestamp };
     }
   }
-
-  /**
-   * Engine Fault Profile:
-   * - RPM becomes erratic (spikes to 3000-6000, oscillates)
-   * - Oil pressure drops progressively
-   * - Vibration increases sharply
-   * - Engine temp climbs moderately
-   */
   _engineFault(base, tick, noise, timestamp) {
-    const severity = Math.min(tick / 8, 1); // 0→1 over 8 ticks
-
+    const severity = Math.min(tick / 8, 1); 
     return {
       ...base,
       timestamp,
@@ -67,16 +47,8 @@ class SimulatorService {
       canErrorCount: Math.round(severity * 15)
     };
   }
-
-  /**
-   * Electrical Fault Profile:
-   * - Voltage drops below 11V
-   * - Current spikes erratically
-   * - Battery SOC drains rapidly
-   */
   _electricalFault(base, tick, noise, timestamp) {
     const severity = Math.min(tick / 8, 1);
-
     return {
       ...base,
       timestamp,
@@ -86,17 +58,8 @@ class SimulatorService {
       canErrorCount: Math.round(severity * 25)
     };
   }
-
-  /**
-   * Coolant Fault Profile:
-   * - Coolant temp spikes rapidly
-   * - Coolant pressure drops
-   * - Flow rate drops
-   * - Engine temp follows with a delay
-   */
   _coolantFault(base, tick, noise, timestamp) {
     const severity = Math.min(tick / 8, 1);
-    
     return {
       ...base,
       timestamp,
@@ -107,15 +70,10 @@ class SimulatorService {
       canErrorCount: Math.round(severity * 5)
     };
   }
-
-  /**
-   * Generate normal/recovery readings (all values return to baseline)
-   */
   generateNormalReading(recoveryTick) {
     const noise = () => (Math.random() - 0.5) * 1;
     const base = { ...this.baselineValues };
     const recovery = Math.min(recoveryTick / 4, 1);
-
     return {
       timestamp: new Date().toISOString(),
       rpm: Math.round(base.rpm + noise() * 30),
@@ -133,5 +91,4 @@ class SimulatorService {
     };
   }
 }
-
 module.exports = { SimulatorService };

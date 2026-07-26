@@ -1,10 +1,5 @@
 import React, { useMemo } from 'react';
 import { motion } from 'framer-motion';
-
-/**
- * SVG Circular Gauge — instrument cluster aesthetic.
- * Animated needle, color-coded arcs, glowing at danger levels.
- */
 export default function Gauge({
   value = 0,
   min = 0,
@@ -14,22 +9,17 @@ export default function Gauge({
   warningThreshold = 70,
   dangerThreshold = 90,
   size = 160,
-  reverse = false, // For metrics where LOW is bad (oil pressure, voltage)
+  reverse = false, 
 }) {
   const radius = 58;
   const strokeWidth = 8;
   const center = 75;
-
-  // Arc spans 240 degrees (from 150° to 390°)
   const startAngle = 150;
   const endAngle = 390;
   const totalAngle = endAngle - startAngle;
-
   const clampedValue = Math.max(min, Math.min(max, value));
   const percentage = (clampedValue - min) / (max - min);
   const needleAngle = startAngle + percentage * totalAngle;
-
-  // Determine color based on thresholds
   const getColor = () => {
     const pct = percentage * 100;
     if (reverse) {
@@ -42,10 +32,7 @@ export default function Gauge({
       return { color: '#10b981', glow: 'gauge-glow-green', status: 'normal' };
     }
   };
-
   const { color, glow, status } = getColor();
-
-  // Create arc path
   const polarToCartesian = (cx, cy, r, angleDeg) => {
     const rad = ((angleDeg - 90) * Math.PI) / 180;
     return {
@@ -53,22 +40,16 @@ export default function Gauge({
       y: cy + r * Math.sin(rad),
     };
   };
-
   const describeArc = (cx, cy, r, start, end) => {
     const s = polarToCartesian(cx, cy, r, start);
     const e = polarToCartesian(cx, cy, r, end);
     const largeArc = end - start > 180 ? 1 : 0;
     return `M ${s.x} ${s.y} A ${r} ${r} 0 ${largeArc} 1 ${e.x} ${e.y}`;
   };
-
   const bgArc = describeArc(center, center, radius, startAngle, endAngle);
   const valueEnd = startAngle + percentage * totalAngle;
   const valueArc = percentage > 0.01 ? describeArc(center, center, radius, startAngle, valueEnd) : '';
-
-  // Needle endpoint
   const needleEnd = polarToCartesian(center, center, radius - 15, needleAngle);
-
-  // Tick marks
   const ticks = useMemo(() => {
     const count = 12;
     const result = [];
@@ -80,7 +61,6 @@ export default function Gauge({
     }
     return result;
   }, []);
-
   return (
     <div className={`flex flex-col items-center ${glow}`} style={{ width: size, height: size + 30 }}>
       <svg
@@ -89,7 +69,7 @@ export default function Gauge({
         height={size}
         className="overflow-visible"
       >
-        {/* Background arc */}
+        {}
         <path
           d={bgArc}
           fill="none"
@@ -97,8 +77,7 @@ export default function Gauge({
           strokeWidth={strokeWidth}
           strokeLinecap="round"
         />
-
-        {/* Value arc */}
+        {}
         {valueArc && (
           <motion.path
             d={valueArc}
@@ -112,8 +91,7 @@ export default function Gauge({
             style={{ filter: status === 'danger' ? `drop-shadow(0 0 6px ${color})` : 'none' }}
           />
         )}
-
-        {/* Tick marks */}
+        {}
         {ticks.map((tick, i) => (
           <line
             key={i}
@@ -125,8 +103,7 @@ export default function Gauge({
             strokeWidth={tick.major ? 1.5 : 0.8}
           />
         ))}
-
-        {/* Needle */}
+        {}
         <motion.line
           x1={center}
           y1={center}
@@ -140,12 +117,10 @@ export default function Gauge({
           transition={{ type: 'spring', stiffness: 80, damping: 15 }}
           style={{ filter: `drop-shadow(0 0 4px ${color})` }}
         />
-
-        {/* Center dot */}
+        {}
         <circle cx={center} cy={center} r={4} fill={color} />
         <circle cx={center} cy={center} r={2} fill="#0a0e17" />
-
-        {/* Value text */}
+        {}
         <text
           x={center}
           y={center + 20}
@@ -158,8 +133,7 @@ export default function Gauge({
         >
           {typeof value === 'number' ? (value % 1 === 0 ? value : value.toFixed(1)) : value}
         </text>
-
-        {/* Unit text */}
+        {}
         <text
           x={center}
           y={center + 32}
@@ -171,8 +145,7 @@ export default function Gauge({
           {unit}
         </text>
       </svg>
-
-      {/* Label */}
+      {}
       <span className="text-xs text-dash-muted font-medium tracking-wide mt-1 uppercase">
         {label}
       </span>

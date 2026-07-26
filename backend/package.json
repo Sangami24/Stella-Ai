@@ -1,7 +1,7 @@
 {
   "name": "stla-guardian-backend",
   "version": "1.0.0",
-  "description": "STLA Guardian AI — Backend Server",
+  "description": "Stella AI — Backend Server",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

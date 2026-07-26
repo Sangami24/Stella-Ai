@@ -5,12 +5,10 @@ import {
   Navigation, CheckCircle, Car, AlertTriangle
 } from 'lucide-react';
 import useStore from '../store/useStore';
-
 export default function MechanicView() {
   const mechanics = useStore((s) => s.mechanics);
   const incident = useStore((s) => s.incident);
   const diagnosis = useStore((s) => s.diagnosis);
-
   if (!mechanics || mechanics.length === 0) {
     return (
       <div className="glass-card p-12 flex flex-col items-center justify-center text-center">
@@ -22,10 +20,9 @@ export default function MechanicView() {
       </div>
     );
   }
-
   return (
     <div className="space-y-6">
-      {/* ── Escalation Banner ──────────────────────────── */}
+      {}
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -76,8 +73,7 @@ export default function MechanicView() {
           </div>
         </div>
       </motion.div>
-
-      {/* ── Mechanic List ──────────────────────────────── */}
+      {}
       <div className="glass-card p-6">
         <div className="flex items-center gap-3 mb-6">
           <MapPin className="w-5 h-5 text-dash-accent" />
@@ -88,7 +84,6 @@ export default function MechanicView() {
             Sorted by distance
           </span>
         </div>
-
         <div className="space-y-4">
           {mechanics.map((mech, index) => (
             <motion.div
@@ -107,7 +102,6 @@ export default function MechanicView() {
                   Nearest — Dispatched
                 </div>
               )}
-
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <h4 className="text-base font-semibold text-dash-text">{mech.name}</h4>
@@ -130,8 +124,7 @@ export default function MechanicView() {
                     {mech.address}
                   </div>
                 </div>
-
-                {/* ETA */}
+                {}
                 <div className="text-right">
                   <div className={`text-2xl font-display font-bold ${
                     index === 0 ? 'text-green-400' : 'text-dash-text'
@@ -152,8 +145,7 @@ export default function MechanicView() {
                   )}
                 </div>
               </div>
-
-              {/* Contact */}
+              {}
               <div className="flex items-center gap-3 mt-4 pt-3 border-t border-dash-border/30">
                 <a className="flex items-center gap-1.5 text-xs text-dash-accent hover:text-dash-glow transition-colors">
                   <Phone className="w-3 h-3" />
@@ -170,8 +162,7 @@ export default function MechanicView() {
           ))}
         </div>
       </div>
-
-      {/* ── Driver Instructions ────────────────────────── */}
+      {}
       <div className="glass-card p-6 border-l-4 border-dash-accent">
         <h3 className="font-display text-sm tracking-wider text-dash-accent font-semibold mb-3">
           DRIVER INSTRUCTIONS
@@ -191,7 +182,7 @@ export default function MechanicView() {
           </div>
           <div className="flex items-start gap-2">
             <span className="text-dash-accent font-bold">4.</span>
-            <p>STLA Guardian AI will continue monitoring your vehicle until the mechanic arrives.</p>
+            <p>Stella AI will continue monitoring your vehicle until the mechanic arrives.</p>
           </div>
         </div>
       </div>

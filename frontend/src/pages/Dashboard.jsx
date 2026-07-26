@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 import useStore from '../store/useStore';
 import Gauge from '../components/Gauge';
-
 const faultTypes = [
   {
     id: 'engine',
@@ -36,7 +35,6 @@ const faultTypes = [
     hoverBg: 'hover:bg-cyan-500/10',
   },
 ];
-
 export default function Dashboard() {
   const telemetry = useStore((s) => s.telemetry);
   const incident = useStore((s) => s.incident);
@@ -50,18 +48,15 @@ export default function Dashboard() {
   const isDemoRunning = useStore((s) => s.isDemoRunning);
   const isSimulating = useStore((s) => s.isSimulating);
   const recoveryProgress = useStore((s) => s.recoveryProgress);
-
-  // Default/baseline telemetry
   const t = telemetry || {
     rpm: 800, oilPressure: 40, engineTemp: 90,
     voltage: 14.2, current: 25, batterySoc: 95,
     coolantTemp: 88, coolantPressure: 15, coolantFlowRate: 8.5,
     speed: 60, vibration: 0.3, throttle: 30,
   };
-
   return (
     <div className="space-y-6">
-      {/* ── Instrument Cluster ────────────────────────── */}
+      {}
       <div className="glass-card p-6">
         <div className="flex items-center gap-3 mb-6">
           <Car className="w-5 h-5 text-dash-accent" />
@@ -97,10 +92,9 @@ export default function Dashboard() {
             </motion.div>
           )}
         </div>
-
-        {/* Gauges Grid */}
+        {}
         <div className="flex flex-wrap justify-center items-end gap-4 lg:gap-6">
-          {/* Speedometer - larger */}
+          {}
           <Gauge
             value={t.speed}
             min={0}
@@ -111,8 +105,7 @@ export default function Dashboard() {
             dangerThreshold={90}
             size={180}
           />
-
-          {/* RPM */}
+          {}
           <Gauge
             value={t.rpm}
             min={0}
@@ -123,8 +116,7 @@ export default function Dashboard() {
             dangerThreshold={80}
             size={160}
           />
-
-          {/* Coolant Temp */}
+          {}
           <Gauge
             value={t.coolantTemp}
             min={40}
@@ -135,8 +127,7 @@ export default function Dashboard() {
             dangerThreshold={85}
             size={160}
           />
-
-          {/* Battery Voltage */}
+          {}
           <Gauge
             value={t.voltage}
             min={8}
@@ -148,8 +139,7 @@ export default function Dashboard() {
             reverse={true}
             size={160}
           />
-
-          {/* Oil Pressure */}
+          {}
           <Gauge
             value={t.oilPressure}
             min={0}
@@ -161,8 +151,7 @@ export default function Dashboard() {
             reverse={true}
             size={150}
           />
-
-          {/* Engine Temp */}
+          {}
           <Gauge
             value={t.engineTemp}
             min={50}
@@ -174,8 +163,7 @@ export default function Dashboard() {
             size={150}
           />
         </div>
-
-        {/* Secondary Metrics Bar */}
+        {}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-6 pt-4 border-t border-dash-border/50">
           <MetricPill label="Battery SOC" value={`${Math.round(t.batterySoc)}%`} warn={t.batterySoc < 50} danger={t.batterySoc < 30} />
           <MetricPill label="Current" value={`${t.current}A`} warn={t.current > 40} danger={t.current > 60} />
@@ -183,8 +171,7 @@ export default function Dashboard() {
           <MetricPill label="Coolant Flow" value={`${t.coolantFlowRate} L/m`} warn={t.coolantFlowRate < 5} danger={t.coolantFlowRate < 3} />
         </div>
       </div>
-
-      {/* ── Diagnosis Card (shows when available) ─────── */}
+      {}
       {diagnosis && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -206,7 +193,6 @@ export default function Dashboard() {
               <div className="text-xs text-dash-muted">CONFIDENCE</div>
             </div>
           </div>
-
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-4">
             <div className="bg-dash-bg/50 rounded-lg p-3">
               <div className="text-xs text-dash-muted mb-1">Affected System</div>
@@ -233,15 +219,13 @@ export default function Dashboard() {
               </div>
             </div>
           </div>
-
           <div className="mt-4 bg-dash-bg/50 rounded-lg p-3">
             <div className="text-xs text-dash-muted mb-1">AI Reasoning</div>
             <p className="text-sm text-dash-text leading-relaxed">{diagnosis.reasoning}</p>
           </div>
         </motion.div>
       )}
-
-      {/* ── Fault Trigger Buttons ─────────────────────── */}
+      {}
       <div className="glass-card p-6">
         <h3 className="font-display text-sm tracking-wider text-dash-muted font-semibold mb-4">
           FAULT SIMULATION
@@ -284,8 +268,7 @@ export default function Dashboard() {
           })}
         </div>
       </div>
-
-      {/* ── Demo Controls ─────────────────────────────── */}
+      {}
       <div className="glass-card p-6">
         <h3 className="font-display text-sm tracking-wider text-dash-muted font-semibold mb-4">
           DEMO CONTROLS
@@ -304,7 +287,6 @@ export default function Dashboard() {
             <Play className="w-4 h-4" />
             Test Demo
           </motion.button>
-
           <motion.button
             whileHover={{ scale: 1.03 }}
             whileTap={{ scale: 0.97 }}
@@ -316,7 +298,6 @@ export default function Dashboard() {
             <RotateCcw className="w-4 h-4" />
             Reset Demo
           </motion.button>
-
           {incident?.status && (
             <div className="flex items-center gap-2 ml-auto px-4 py-2 rounded-lg bg-dash-bg/50 text-xs text-dash-muted">
               Status: <span className="text-dash-text font-semibold">{incident.status.toUpperCase()}</span>
@@ -327,7 +308,6 @@ export default function Dashboard() {
     </div>
   );
 }
-
 function MetricPill({ label, value, warn, danger }) {
   const color = danger ? 'text-dash-danger' : warn ? 'text-dash-warning' : 'text-dash-success';
   return (

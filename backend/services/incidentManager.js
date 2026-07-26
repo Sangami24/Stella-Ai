@@ -1,27 +1,21 @@
-/**
- * Incident Manager — manages the lifecycle of a vehicle diagnostic incident.
- * In-memory state machine with timeline events and Socket.IO broadcasting.
- */
 const { v4: uuidv4 } = require('uuid');
-
 class IncidentManager {
   constructor(io) {
     this.io = io;
     this.incident = null;
   }
-
   createIncident(faultTrigger) {
     this.incident = {
       id: uuidv4(),
-      faultTrigger, // For internal tracking only — NOT sent to AI
+      faultTrigger, 
       status: 'detected',
       priority: 'high',
       severity: null,
       diagnosis: null,
       callStatus: null,
       callRecipient: null,
-      activeCallRole: null, // 'engineer', 'mechanic', 'driver'
-      pendingResolution: null, // to track sequential call state
+      activeCallRole: null, 
+      pendingResolution: null, 
       transcript: [],
       mechanics: null,
       resolution: null,
@@ -38,16 +32,13 @@ class IncidentManager {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
-
     this.io.emit('incident', this.incident);
     return this.incident;
   }
-
   updateStatus(status) {
     if (!this.incident) return;
     this.incident.status = status;
     this.incident.updatedAt = new Date().toISOString();
-
     const timelineMap = {
       'diagnosing': {
         event: 'ai_diagnosing',
@@ -99,34 +90,26 @@ class IncidentManager {
         color: 'yellow'
       }
     };
-
     if (timelineMap[status]) {
-      // Mark previous in_progress as completed
       this.incident.timeline.forEach(t => {
         if (t.status === 'in_progress') t.status = 'completed';
       });
-
       this.incident.timeline.push({
         ...timelineMap[status],
         timestamp: new Date().toISOString()
       });
     }
-
     this.io.emit('incident', this.incident);
   }
-
   setDiagnosis(diagnosis) {
     if (!this.incident) return;
     this.incident.diagnosis = diagnosis;
     this.incident.severity = diagnosis.severity;
     this.incident.status = 'diagnosed';
     this.incident.updatedAt = new Date().toISOString();
-
-    // Update timeline
     this.incident.timeline.forEach(t => {
       if (t.status === 'in_progress') t.status = 'completed';
     });
-
     this.incident.timeline.push({
       event: 'diagnosis_complete',
       label: 'Diagnosis Complete',
@@ -135,11 +118,9 @@ class IncidentManager {
       status: 'completed',
       color: 'blue'
     });
-
     this.io.emit('incident', this.incident);
     this.io.emit('diagnosis', diagnosis);
   }
-
   addTranscriptLine(speaker, text) {
     if (!this.incident) return;
     const line = {
@@ -151,50 +132,41 @@ class IncidentManager {
     this.io.emit('transcript', line);
     this.io.emit('incident', this.incident);
   }
-
   setCallStatus(status) {
     if (!this.incident) return;
     this.incident.callStatus = status;
     this.io.emit('call-status', status);
     this.io.emit('incident', this.incident);
   }
-
   setCallRecipient(recipient) {
     if (!this.incident) return;
     this.incident.callRecipient = recipient;
     this.io.emit('incident', this.incident);
   }
-
   setActiveCallRole(role) {
     if (!this.incident) return;
     this.incident.activeCallRole = role;
   }
-
   setPendingResolution(data) {
     if (!this.incident) return;
     this.incident.pendingResolution = data;
   }
-
   setMechanics(mechanics) {
     if (!this.incident) return;
     this.incident.mechanics = mechanics;
     this.io.emit('incident', this.incident);
   }
-
   setResolution(resolution) {
     if (!this.incident) return;
     this.incident.resolution = resolution;
     this.io.emit('incident', this.incident);
   }
-
   getIncident() {
     return this.incident;
   }
-
   reset() {
     this.incident = null;
     this.io.emit('incident', null);
   }
 }
-
 module.exports = { IncidentManager };

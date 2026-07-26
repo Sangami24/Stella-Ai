@@ -1,8 +1,6 @@
-# 🛡️ STLA Guardian AI — Smart Connected Diagnostics Platform
+# 🛡️ Stella AI — Smart Connected Diagnostics Platform
 
-**Team Falcons | Stellantis IGNITE | CON-01**
-
-A realistic car dashboard UI with AI-powered vehicle diagnostics. Simulates faults, streams telemetry, uses Gemini AI to diagnose issues blindly from sensor data, initiates Twilio voice calls with engineers, and automatically resolves or escalates incidents — all in real time.
+A realistic car dashboard UI with AI-powered vehicle diagnostics. Simulates faults, streams telemetry, uses a dual Machine Learning pipeline (Isolation Forest for Anomaly Detection, XGBoost for Fault Classification), and Gemini AI to diagnose issues blindly from sensor data. It initiates Twilio voice calls with engineers, and automatically resolves or escalates incidents — all in real time.
 
 ---
 
@@ -41,7 +39,7 @@ Navigate to **http://localhost:5173** in your browser.
 
 ---
 
-## 🎬 Demo Script (For Judges)
+## 🎬 Demo Script
 
 ### Quick Demo (2 minutes)
 1. Open the dashboard — show the instrument cluster with all-green gauges
@@ -130,6 +128,7 @@ Navigate to **http://localhost:5173** in your browser.
 
 - **Frontend**: React 18 + Vite + TailwindCSS + Framer Motion + Lucide Icons + Zustand
 - **Backend**: Node.js + Express + Socket.IO
-- **AI**: Google Gemini 2.0 Flash
-- **Voice**: Twilio Voice API (two-way)
+- **AI / Edge Analytics**: Python + Scikit-Learn (RandomForest) + XGBoost + Pandas
+- **Generative AI**: Google Gemini 2.0 Flash
+- **Voice / Comms**: Twilio Voice & Messaging API (two-way calling + WhatsApp + SMS)
 - **State**: Zustand (frontend) + In-memory JSON (backend)
