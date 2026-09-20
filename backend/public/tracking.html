@@ -294,7 +294,31 @@
       white-space: nowrap;
     }
     .marker-provider {
+      position: relative;
+      width: 52px;
+      height: 52px;
+      border: 3px solid #f8fafc;
+      border-radius: 50%;
+      background: #1677ff;
+      color: #fff;
+      font-size: 28px;
+      box-shadow: 0 0 0 6px rgba(22, 119, 255, 0.28), 0 8px 18px rgba(15, 23, 42, 0.65);
       animation: markerBounce 2s ease-in-out infinite;
+    }
+    .marker-provider::after {
+      content: attr(data-label);
+      position: absolute;
+      top: 56px;
+      left: 50%;
+      transform: translateX(-50%);
+      border-radius: 999px;
+      background: #0f172a;
+      border: 1px solid #60a5fa;
+      padding: 3px 7px;
+      color: #dbeafe;
+      font-size: 9px;
+      letter-spacing: 0.08em;
+      white-space: nowrap;
     }
     @keyframes markerBounce {
       0%, 100% { transform: translateY(0); }
@@ -453,6 +477,9 @@
           providerMarker = new maplibregl.Marker({ element: providerEl })
             .setLngLat([data.providerLocation.lon, data.providerLocation.lat])
             .addTo(map);
+          providerEl.innerHTML = data.role === 'tow truck' ? '&#128667;' : '&#128295;';
+          providerEl.dataset.label = data.role === 'tow truck' ? 'TOW TRUCK' : 'MECHANIC';
+          providerEl.setAttribute('aria-label', data.role === 'tow truck' ? 'Tow truck en route' : 'Mechanic en route');
 
           // Route line
           map.addSource('route', {
@@ -473,9 +500,9 @@
             type: 'line',
             source: 'route',
             paint: {
-              'line-color': '#6366f1',
-              'line-width': 3,
-              'line-dasharray': [2, 2]
+              'line-color': '#1677ff',
+              'line-width': 5,
+              'line-opacity': 0.9
             }
           });
           requestRoadRoute(data);

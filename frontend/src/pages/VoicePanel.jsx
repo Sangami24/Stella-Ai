@@ -14,19 +14,20 @@ export default function VoicePanel() {
   const callWaiting = useStore((s) => s.callWaiting);
   const aiStatus = useStore((s) => s.aiStatus);
   const transcriptEndRef = useRef(null);
-  const [selectedRole, setSelectedRole] = React.useState('all');
-  const visibleTranscript = selectedRole === 'all'
-    ? transcript
-    : transcript.filter((line) => line.role === selectedRole || line.callPhase === selectedRole);
+  const currentPhase = incident?.callPhase || 'engineer';
+  const callAttempt = incident?.callAttempt || 0;
+  const [selectedRole, setSelectedRole] = React.useState('engineer');
+  const visibleTranscript = transcript.filter((line) => line.role === selectedRole || line.callPhase === selectedRole);
+
+  useEffect(() => {
+    if (['engineer', 'mechanic', 'driver'].includes(currentPhase)) setSelectedRole(currentPhase);
+  }, [currentPhase]);
 
   useEffect(() => {
     transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [transcript, selectedRole]);
 
   const isCallActive = callStatus === 'connected' || callStatus === 'ringing' || callStatus === 'in-progress';
-  const currentPhase = incident?.callPhase || 'engineer';
-  const callAttempt = incident?.callAttempt || 0;
-
   const getCallPhaseLabel = (phase) => {
     switch (phase) {
       case 'engineer': return 'Call 1/3 — Engineer';
@@ -196,10 +197,8 @@ export default function VoicePanel() {
           </h3>
 
           <div className="flex gap-2 mb-4">
-            {['all', 'engineer', 'mechanic', 'driver'].map(role => {
-              const roleCount = role === 'all'
-                ? transcript.length
-                : transcript.filter(line => line.role === role || line.callPhase === role).length;
+            {['engineer', 'mechanic', 'driver'].map(role => {
+              const roleCount = transcript.filter(line => line.role === role || line.callPhase === role).length;
               return (
                 <button
                   key={role}
@@ -210,7 +209,7 @@ export default function VoicePanel() {
                       : 'bg-dash-bg/50 text-dash-muted hover:text-dash-text hover:bg-dash-bg border border-dash-border/50'
                   }`}
                 >
-                  {role === 'all' ? 'All calls' : role === 'mechanic' ? 'Service Provider' : role}
+                  {role === 'mechanic' ? 'Service Provider' : role}
                   {roleCount > 0 && (
                     <span className="ml-1.5 opacity-70">({roleCount})</span>
                   )}

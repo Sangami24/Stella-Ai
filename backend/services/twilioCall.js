@@ -57,7 +57,7 @@ class TwilioCallService {
     if (!diagnosis) return 'Hello, Stella AI here. Live TCU data flags a vehicle fault. Mechanic or tow truck?';
     const system = String(diagnosis.affectedSystem || 'vehicle system').replace(/\s*\/\s*/g, ' and ');
     const severity = Number(diagnosis.severity || 4);
-    return `Hello, Stella AI here. Live TCU data flags a critical ${system} fault, severity ${severity} of 5. Mechanic or tow truck?`;
+    return `Hello, Stella AI here. Live TCU data flags a critical ${system} fault, severity ${severity} of 5. The readings need your quick recommendation. Mechanic or tow truck?`;
   }
 
   _getSimpleIssue(issue) {
@@ -417,7 +417,7 @@ class TwilioCallService {
     const VoiceResponse = twilio.twiml.VoiceResponse;
     const response = new VoiceResponse();
 
-    const message = `Stella AI. A vehicle in Bengaluru needs a ${role} for a ${this._getSimpleIssue(issue)}. Are you available?`;
+    const message = `Stella AI. A vehicle in Bengaluru needs a ${role} for a ${this._getSimpleIssue(issue)}. The driver is safely parked and the location is ready on WhatsApp. Are you available?`;
 
     this.incidentManager.addTranscriptLine('AI', message);
     response.say({ voice: this.voice, language: this.voiceLanguage }, message);
@@ -593,7 +593,7 @@ class TwilioCallService {
     if (!this._isCurrentSimulatedFlow(flowGeneration)) return;
     this.incidentManager.setCallStatus('connected');
 
-    this.incidentManager.addTranscriptLine('AI', `Hello, this is Stella AI. We have a vehicle breakdown. We need a ${role}. Are you available?`);
+    this.incidentManager.addTranscriptLine('AI', `Stella AI. A vehicle in Bengaluru needs a ${role}. The driver is safely parked and the location is ready on WhatsApp. Are you available?`);
     await this._delay(3000);
     if (!this._isCurrentSimulatedFlow(flowGeneration)) return;
     this.incidentManager.addTranscriptLine(role === 'tow truck' ? 'Tow Truck' : 'Mechanic', 'Yes, I am available. I will head there now.');
@@ -687,7 +687,7 @@ class TwilioCallService {
     const VoiceResponse = twilio.twiml.VoiceResponse;
     const response = new VoiceResponse();
 
-    const message = `Stella AI. Your car has a ${this._getSimpleIssue(issue)}. A ${role} is on the way. ETA: ${eta}. Check WhatsApp to track them. Please stay safe.`;
+    const message = `Stella AI. Your car has a ${this._getSimpleIssue(issue)}. A ${role} is on the way. ETA: ${eta}. The problem with your car has been shared on WhatsApp, along with the tracking link. Please stay safe.`;
 
     this.incidentManager.addTranscriptLine('AI', message);
     response.say({ voice: this.voice, language: this.voiceLanguage }, message);
@@ -728,7 +728,7 @@ class TwilioCallService {
 
     const rootCause = diagnosis?.rootCause || 'system failure';
     this.incidentManager.addTranscriptLine('AI',
-      `Hello, this is Stella AI. Don't panic. Your vehicle has: ${rootCause}. We've spoken to the engineer. A ${role} is on the way. ETA: ${eta || '15 min'}. Check WhatsApp for live tracking.`
+      `Stella AI. Your car has a ${this._getSimpleIssue(rootCause)}. A ${role} is on the way. ETA: ${eta || '15 min'}. The problem with your car and live tracking are on WhatsApp.`
     );
     await this._delay(4000);
     if (!this._isCurrentSimulatedFlow(flowGeneration)) return;
