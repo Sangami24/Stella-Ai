@@ -37,18 +37,19 @@ class TwilioCallService {
     this.voiceLanguage = process.env.TWILIO_TTS_LANGUAGE || 'en-IN';
     this.webhookBaseUrl = process.env.TWILIO_WEBHOOK_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:3001';
     this.demoContactNumber = process.env.DEMO_CONTACT_NUMBER;
-    this.toNumber = this.demoContactNumber || process.env.TWILIO_ENGINEER_NUMBER || process.env.TWILIO_TO_NUMBER || '+919535728467';
-    this.mechanicNumber = this.demoContactNumber || process.env.TWILIO_MECHANIC_NUMBER || process.env.TWILIO_TO_NUMBER || '+919535728467';
-    this.driverNumber = this.demoContactNumber || process.env.TWILIO_DRIVER_NUMBER || process.env.TWILIO_TO_NUMBER || '+919535728467';
+    const fallbackNumber = this.demoContactNumber || process.env.TWILIO_TO_NUMBER || '+919535728467';
+    this.toNumber = process.env.TWILIO_ENGINEER_NUMBER || process.env.TWILIO_TO_NUMBER || fallbackNumber;
+    this.mechanicNumber = process.env.TWILIO_MECHANIC_NUMBER || process.env.TWILIO_TO_NUMBER || fallbackNumber;
+    this.driverNumber = process.env.TWILIO_DRIVER_NUMBER || process.env.TWILIO_TO_NUMBER || fallbackNumber;
 
     const accountSid = process.env.TWILIO_ACCOUNT_SID;
     const authToken = process.env.TWILIO_AUTH_TOKEN;
     if (accountSid && authToken) {
       this.client = twilio(accountSid, authToken);
       this.fromNumber = process.env.TWILIO_FROM_NUMBER;
-      this.toNumber = this.demoContactNumber || process.env.TWILIO_ENGINEER_NUMBER || process.env.TWILIO_TO_NUMBER || '+919535728467';
-      this.mechanicNumber = this.demoContactNumber || process.env.TWILIO_MECHANIC_NUMBER || process.env.TWILIO_TO_NUMBER || '+919535728467';
-      this.driverNumber = this.demoContactNumber || process.env.TWILIO_DRIVER_NUMBER || process.env.TWILIO_TO_NUMBER || '+919535728467';
+      this.toNumber = process.env.TWILIO_ENGINEER_NUMBER || process.env.TWILIO_TO_NUMBER || fallbackNumber;
+      this.mechanicNumber = process.env.TWILIO_MECHANIC_NUMBER || process.env.TWILIO_TO_NUMBER || fallbackNumber;
+      this.driverNumber = process.env.TWILIO_DRIVER_NUMBER || process.env.TWILIO_TO_NUMBER || fallbackNumber;
     }
   }
 
@@ -368,7 +369,7 @@ class TwilioCallService {
 
     if (this.trackingService && !incident.trackingSessionId) {
       const session = this.trackingService.createSession(incident, role, eta);
-      const trackingUrl = `${this.webhookBaseUrl}/track/${session.sessionId}`;
+      const trackingUrl = this.trackingService.getPublicTrackingUrl(session, this.webhookBaseUrl);
       this.incidentManager.setTrackingInfo(session.sessionId, trackingUrl);
     }
 
@@ -473,7 +474,7 @@ class TwilioCallService {
       let trackingUrl = '';
       if (this.trackingService && incident) {
         const session = this.trackingService.createSession(incident, role, eta);
-        trackingUrl = `${this.webhookBaseUrl}/track/${session.sessionId}`;
+        trackingUrl = this.trackingService.getPublicTrackingUrl(session, this.webhookBaseUrl);
         this.incidentManager.setTrackingInfo(session.sessionId, trackingUrl);
       }
 
@@ -611,7 +612,7 @@ class TwilioCallService {
     const eta = role === 'tow truck' ? '15 min' : '12 min';
     if (this.trackingService && incident) {
       const session = this.trackingService.createSession(incident, role, eta);
-      const trackingUrl = `${this.webhookBaseUrl}/track/${session.sessionId}`;
+      const trackingUrl = this.trackingService.getPublicTrackingUrl(session, this.webhookBaseUrl);
       this.incidentManager.setTrackingInfo(session.sessionId, trackingUrl);
     }
 

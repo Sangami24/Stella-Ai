@@ -121,20 +121,6 @@
       font-weight: 800;
       color: #818cf8;
     }
-    .progress-bar {
-      width: 100%;
-      height: 4px;
-      background: rgba(255,255,255,0.08);
-      border-radius: 2px;
-      overflow: hidden;
-      margin-bottom: 14px;
-    }
-    .progress-fill {
-      height: 100%;
-      background: linear-gradient(90deg, #6366f1, #818cf8);
-      border-radius: 2px;
-      transition: width 1s ease;
-    }
     .details-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -387,6 +373,14 @@
           <div class="detail-label">Service Type</div>
           <div id="serviceType" class="detail-value">--</div>
         </div>
+        <div class="detail-item">
+          <div class="detail-label">Provider phone</div>
+          <div id="providerPhone" class="detail-value">--</div>
+        </div>
+        <div class="detail-item">
+          <div class="detail-label">Driver location</div>
+          <div class="detail-value">Pinned on map</div>
+        </div>
       </div>
       <a id="callBtn" href="tel:+919535728467" class="call-btn">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -405,14 +399,16 @@
 
   <script>
     const sessionId = window.location.pathname.split('/').pop();
+    const trackingToken = new URLSearchParams(window.location.search).get('t');
     const API_BASE = window.location.origin;
-    let map, providerMarker, driverMarker, routeLine;
+    const positionUrl = () => `${API_BASE}/api/tracking/${sessionId}/position${trackingToken ? `?t=${encodeURIComponent(trackingToken)}` : ''}`;
+    let map, providerMarker, driverMarker;
     let hasArrived = false;
-    let lastRouteRequestAt = 0;
+    let roadRouteCoordinates = [];
 
     async function init() {
       try {
-        const res = await fetch(`${API_BASE}/api/tracking/${sessionId}/position`);
+        const res = await fetch(positionUrl());
         if (!res.ok) throw new Error('Session not found');
         const data = await res.json();
 
@@ -445,7 +441,7 @@
           // Driver marker
           const driverEl = document.createElement('div');
           driverEl.className = 'marker-driver';
-          driverEl.textContent = 'D';
+          driverEl.innerHTML = '&#128205;';
           driverMarker = new maplibregl.Marker({ element: driverEl })
             .setLngLat([data.driverLocation.lon, data.driverLocation.lat])
             .addTo(map);
@@ -482,7 +478,7 @@
               'line-dasharray': [2, 2]
             }
           });
-          requestRoadRoute(data, true);
+          requestRoadRoute(data);
 
           // Fit bounds
           const bounds = new maplibregl.LngLatBounds();
@@ -512,17 +508,15 @@
     async function pollPosition() {
       if (hasArrived) return;
       try {
-        const res = await fetch(`${API_BASE}/api/tracking/${sessionId}/position`);
+        const res = await fetch(positionUrl());
         if (!res.ok) return;
         const data = await res.json();
         updateUI(data);
 
         // Update provider marker position
         if (providerMarker) {
-          providerMarker.setLngLat([data.providerLocation.lon, data.providerLocation.lat]);
+          setProviderPosition(data);
         }
-
-        requestRoadRoute(data);
 
         // Check arrival
         if (data.status === 'arrived' && !hasArrived) {
@@ -534,11 +528,8 @@
       } catch (e) { /* ignore */ }
     }
 
-    async function requestRoadRoute(data, force = false) {
+    async function requestRoadRoute(data) {
       if (!map || !map.getSource('route')) return;
-      const now = Date.now();
-      if (!force && now - lastRouteRequestAt < 8000) return;
-      lastRouteRequestAt = now;
 
       const start = `${data.providerLocation.lon},${data.providerLocation.lat}`;
       const end = `${data.driverLocation.lon},${data.driverLocation.lat}`;
@@ -546,11 +537,23 @@
         const response = await fetch(`https://router.project-osrm.org/route/v1/driving/${start};${end}?overview=full&geometries=geojson`);
         const route = (await response.json()).routes?.[0]?.geometry;
         if (route?.coordinates?.length) {
+          roadRouteCoordinates = route.coordinates;
           map.getSource('route').setData({ type: 'Feature', geometry: route });
+          setProviderPosition(data);
         }
       } catch (error) {
-        // The initial route remains visible if the public road-routing service is unavailable.
       }
+    }
+
+    function setProviderPosition(data) {
+      if (!providerMarker) return;
+      const progress = Math.max(0, Math.min(1, Number(data.progress || 0) / 100));
+      if (roadRouteCoordinates.length > 1) {
+        const index = Math.min(roadRouteCoordinates.length - 1, Math.round((roadRouteCoordinates.length - 1) * progress));
+        providerMarker.setLngLat(roadRouteCoordinates[index]);
+        return;
+      }
+      providerMarker.setLngLat([data.providerLocation.lon, data.providerLocation.lat]);
     }
 
     function updateUI(data) {
@@ -559,6 +562,7 @@
       document.getElementById('etaValue').textContent = data.etaRemainingFormatted || '--:--';
       document.getElementById('vehicleNum').textContent = data.vehicleNumber || '--';
       document.getElementById('serviceType').textContent = (data.role || 'service').charAt(0).toUpperCase() + (data.role || 'service').slice(1);
+      document.getElementById('providerPhone').textContent = data.providerPhone || '--';
 
       if (data.providerPhone) {
         document.getElementById('callBtn').href = `tel:${data.providerPhone}`;

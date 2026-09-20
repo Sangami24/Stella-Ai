@@ -15,6 +15,7 @@ class TrackingService {
     const startLon = driverLon + (0.02 + Math.random() * 0.015);
 
     const etaMinutes = parseInt(eta) || 12;
+    const createdAt = Date.now();
     const session = {
       sessionId,
       role,
@@ -23,14 +24,16 @@ class TrackingService {
       providerStart: { lat: startLat, lon: startLon },
       providerCurrent: { lat: startLat, lon: startLon },
       vehicleNumber: this._generateVehicleNumber(),
-      providerPhone: '+919535728467',
+      providerPhone: process.env.TWILIO_MECHANIC_NUMBER || process.env.DEMO_CONTACT_NUMBER || '+919535728467',
       providerName: role === 'tow truck' ? 'RapidRescue Towing' : 'AutoCare Express',
       etaMinutes,
       etaRemainingSeconds: etaMinutes * 60,
-      createdAt: Date.now(),
-      arrivalTime: Date.now() + (etaMinutes * 60 * 1000),
+      createdAt,
+      arrivalTime: createdAt + (etaMinutes * 60 * 1000),
       rootCause: incident?.diagnosis?.rootCause || 'Vehicle breakdown',
     };
+
+    session.trackingToken = this._createPublicToken(session);
 
     this.sessions.set(sessionId, session);
 
@@ -40,12 +43,12 @@ class TrackingService {
     return session;
   }
 
-  getSession(sessionId) {
-    return this.sessions.get(sessionId) || null;
+  getSession(sessionId, trackingToken) {
+    return this.sessions.get(sessionId) || this._restorePublicSession(sessionId, trackingToken);
   }
 
-  getPosition(sessionId) {
-    const session = this.sessions.get(sessionId);
+  getPosition(sessionId, trackingToken) {
+    const session = this.getSession(sessionId, trackingToken);
     if (!session) return null;
 
     const elapsed = Date.now() - session.createdAt;
@@ -103,6 +106,61 @@ class TrackingService {
     const session = this.sessions.get(sessionId);
     if (session) {
       session.status = 'completed';
+    }
+  }
+
+  getPublicTrackingUrl(session, baseUrl) {
+    const base = String(baseUrl || '').replace(/\/$/, '');
+    return `${base}/track/${session.sessionId}?t=${encodeURIComponent(session.trackingToken)}`;
+  }
+
+  _createPublicToken(session) {
+    const payload = {
+      v: 1,
+      sessionId: session.sessionId,
+      role: session.role,
+      driverLocation: session.driverLocation,
+      providerStart: session.providerStart,
+      vehicleNumber: session.vehicleNumber,
+      providerPhone: session.providerPhone,
+      providerName: session.providerName,
+      etaMinutes: session.etaMinutes,
+      createdAt: session.createdAt,
+      rootCause: session.rootCause,
+      expiresAt: session.createdAt + (24 * 60 * 60 * 1000),
+    };
+    return Buffer.from(JSON.stringify(payload)).toString('base64url');
+  }
+
+  _restorePublicSession(sessionId, trackingToken) {
+    if (!trackingToken) return null;
+    try {
+      const payload = JSON.parse(Buffer.from(String(trackingToken), 'base64url').toString('utf8'));
+      const required = ['sessionId', 'role', 'driverLocation', 'providerStart', 'vehicleNumber', 'providerPhone', 'providerName', 'etaMinutes', 'createdAt', 'rootCause', 'expiresAt'];
+      if (payload.v !== 1 || payload.sessionId !== sessionId || required.some((key) => payload[key] == null) || Date.now() > payload.expiresAt) return null;
+
+      const session = {
+        sessionId: payload.sessionId,
+        role: payload.role,
+        status: 'en-route',
+        driverLocation: payload.driverLocation,
+        providerStart: payload.providerStart,
+        providerCurrent: payload.providerStart,
+        vehicleNumber: payload.vehicleNumber,
+        providerPhone: payload.providerPhone,
+        providerName: payload.providerName,
+        etaMinutes: Number(payload.etaMinutes),
+        etaRemainingSeconds: Number(payload.etaMinutes) * 60,
+        createdAt: Number(payload.createdAt),
+        arrivalTime: Number(payload.createdAt) + (Number(payload.etaMinutes) * 60 * 1000),
+        rootCause: payload.rootCause,
+        trackingToken: trackingToken,
+      };
+      this.sessions.set(sessionId, session);
+      this._simulateMovement(sessionId);
+      return session;
+    } catch {
+      return null;
     }
   }
 
