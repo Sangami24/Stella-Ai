@@ -7,12 +7,9 @@ class TrackingService {
 
   createSession(incident, role, eta) {
     const sessionId = uuidv4().split('-')[0];
-    // Driver location (Bangalore area)
     const driverLat = 12.9716;
     const driverLon = 77.5946;
-    // Service provider starts ~3-5km away
-    const startLat = driverLat + (0.02 + Math.random() * 0.015);
-    const startLon = driverLon + (0.02 + Math.random() * 0.015);
+    const { startLat, startLon } = this._providerStartFor(sessionId);
 
     const etaMinutes = parseInt(eta) || 12;
     const createdAt = Date.now();
@@ -24,7 +21,7 @@ class TrackingService {
       driverLocation: { lat: driverLat, lon: driverLon },
       providerStart: { lat: startLat, lon: startLon },
       providerCurrent: { lat: startLat, lon: startLon },
-      vehicleNumber: this._generateVehicleNumber(),
+      vehicleNumber: this._generateVehicleNumber(sessionId),
       providerPhone: process.env.TWILIO_MECHANIC_NUMBER || process.env.DEMO_CONTACT_NUMBER || '+919535728467',
       providerName: role === 'tow truck' ? 'RapidRescue Towing' : 'AutoCare Express',
       etaMinutes,
@@ -112,30 +109,17 @@ class TrackingService {
 
   getPublicTrackingUrl(session, baseUrl) {
     const base = String(baseUrl || '').replace(/\/$/, '');
-    return `${base}/track/${session.sessionId}?t=${encodeURIComponent(session.trackingToken)}`;
+    return `${base}/track/${session.sessionId}?p=${encodeURIComponent(session.trackingToken)}`;
   }
 
   _createPublicToken(session) {
-    const payload = {
-      v: 1,
-      sessionId: session.sessionId,
-      role: session.role,
-      driverLocation: session.driverLocation,
-      providerStart: session.providerStart,
-      vehicleNumber: session.vehicleNumber,
-      providerPhone: session.providerPhone,
-      providerName: session.providerName,
-      etaMinutes: session.etaMinutes,
-      simulationDurationSeconds: session.simulationDurationSeconds,
-      createdAt: session.createdAt,
-      rootCause: session.rootCause,
-      expiresAt: session.createdAt + (24 * 60 * 60 * 1000),
-    };
-    return Buffer.from(JSON.stringify(payload)).toString('base64url');
+    const roleCode = session.role === 'tow truck' ? 't' : 'm';
+    return `${roleCode}.${session.createdAt.toString(36)}.${this._issueCode(session.rootCause)}`;
   }
 
   _restorePublicSession(sessionId, trackingToken) {
     if (!trackingToken) return null;
+    if (String(trackingToken).includes('.')) return this._restoreCompactSession(sessionId, trackingToken);
     try {
       const payload = JSON.parse(Buffer.from(String(trackingToken), 'base64url').toString('utf8'));
       const required = ['sessionId', 'role', 'driverLocation', 'providerStart', 'vehicleNumber', 'providerPhone', 'providerName', 'etaMinutes', 'simulationDurationSeconds', 'createdAt', 'rootCause', 'expiresAt'];
@@ -167,10 +151,69 @@ class TrackingService {
     }
   }
 
-  _generateVehicleNumber() {
+  _restoreCompactSession(sessionId, trackingToken) {
+    const [roleCode, createdAtValue, issueCode] = String(trackingToken).split('.');
+    const createdAt = parseInt(createdAtValue, 36);
+    if (!['t', 'm'].includes(roleCode) || !Number.isFinite(createdAt) || Date.now() - createdAt > 24 * 60 * 60 * 1000 || createdAt > Date.now() + 60 * 1000) return null;
+
+    const role = roleCode === 't' ? 'tow truck' : 'mechanic';
+    const etaMinutes = role === 'tow truck' ? 15 : 12;
+    const { startLat, startLon } = this._providerStartFor(sessionId);
+    const session = {
+      sessionId,
+      role,
+      status: 'en-route',
+      driverLocation: { lat: 12.9716, lon: 77.5946 },
+      providerStart: { lat: startLat, lon: startLon },
+      providerCurrent: { lat: startLat, lon: startLon },
+      vehicleNumber: this._generateVehicleNumber(sessionId),
+      providerPhone: process.env.TWILIO_MECHANIC_NUMBER || process.env.DEMO_CONTACT_NUMBER || '+919535728467',
+      providerName: role === 'tow truck' ? 'RapidRescue Towing' : 'AutoCare Express',
+      etaMinutes,
+      simulationDurationSeconds: Math.max(30, Number(process.env.TRACKING_DEMO_DURATION_SECONDS || 90)),
+      etaRemainingSeconds: etaMinutes * 60,
+      createdAt,
+      arrivalTime: createdAt + (Math.max(30, Number(process.env.TRACKING_DEMO_DURATION_SECONDS || 90)) * 1000),
+      rootCause: this._issueText(issueCode),
+      trackingToken,
+    };
+    this.sessions.set(sessionId, session);
+    this._simulateMovement(sessionId);
+    return session;
+  }
+
+  _providerStartFor(sessionId) {
+    const seed = [...String(sessionId)].reduce((total, char) => total + char.charCodeAt(0), 0);
+    return {
+      startLat: 12.9716 + (0.02 + (seed % 150) / 10000),
+      startLon: 77.5946 + (0.02 + ((seed * 7) % 150) / 10000),
+    };
+  }
+
+  _issueCode(rootCause) {
+    const text = String(rootCause || '').toLowerCase();
+    if (text.includes('brake')) return 'brk';
+    if (text.includes('transmission') || text.includes('gear')) return 'trn';
+    if (text.includes('coolant') || text.includes('cooling')) return 'clt';
+    if (text.includes('electrical') || text.includes('battery') || text.includes('voltage')) return 'ele';
+    return 'eng';
+  }
+
+  _issueText(issueCode) {
+    return {
+      brk: 'Brake system fault',
+      trn: 'Transmission fault',
+      clt: 'Engine cooling fault',
+      ele: 'Electrical system fault',
+      eng: 'Engine fault',
+    }[issueCode] || 'Vehicle breakdown';
+  }
+
+  _generateVehicleNumber(seed = Math.random().toString()) {
     const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
-    const num = Math.floor(1000 + Math.random() * 9000);
-    const alpha = chars[Math.floor(Math.random() * 26)] + chars[Math.floor(Math.random() * 26)];
+    const value = [...String(seed)].reduce((total, char) => (total * 31 + char.charCodeAt(0)) >>> 0, 7);
+    const num = 1000 + (value % 9000);
+    const alpha = chars[value % 26] + chars[Math.floor(value / 26) % 26];
     return `KA-01-${alpha}-${num}`;
   }
 

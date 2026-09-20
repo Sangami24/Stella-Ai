@@ -482,13 +482,13 @@ app.get('/track/:sessionId', (req, res) => {
 });
 
 app.get('/api/tracking/:sessionId', (req, res) => {
-  const session = trackingService.getSession(req.params.sessionId, req.query.t);
+  const session = trackingService.getSession(req.params.sessionId, req.query.p || req.query.t);
   if (!session) return res.status(404).json({ error: 'Session not found' });
   res.json(session);
 });
 
 app.get('/api/tracking/:sessionId/position', (req, res) => {
-  const position = trackingService.getPosition(req.params.sessionId, req.query.t);
+  const position = trackingService.getPosition(req.params.sessionId, req.query.p || req.query.t);
   if (!position) return res.status(404).json({ error: 'Session not found' });
   res.json(position);
 });
