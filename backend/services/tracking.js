@@ -13,7 +13,7 @@ class TrackingService {
 
     const etaMinutes = parseInt(eta) || 12;
     const createdAt = Date.now();
-    const simulationDurationSeconds = Math.max(30, Number(process.env.TRACKING_DEMO_DURATION_SECONDS || 90));
+    const simulationDurationSeconds = Math.max(30, Number(process.env.TRACKING_DEMO_DURATION_SECONDS || 180));
     const session = {
       sessionId,
       role,
@@ -170,10 +170,10 @@ class TrackingService {
       providerPhone: process.env.TWILIO_MECHANIC_NUMBER || process.env.DEMO_CONTACT_NUMBER || '+919535728467',
       providerName: role === 'tow truck' ? 'RapidRescue Towing' : 'AutoCare Express',
       etaMinutes,
-      simulationDurationSeconds: Math.max(30, Number(process.env.TRACKING_DEMO_DURATION_SECONDS || 90)),
+      simulationDurationSeconds: Math.max(30, Number(process.env.TRACKING_DEMO_DURATION_SECONDS || 180)),
       etaRemainingSeconds: etaMinutes * 60,
       createdAt,
-      arrivalTime: createdAt + (Math.max(30, Number(process.env.TRACKING_DEMO_DURATION_SECONDS || 90)) * 1000),
+      arrivalTime: createdAt + (Math.max(30, Number(process.env.TRACKING_DEMO_DURATION_SECONDS || 180)) * 1000),
       rootCause: this._issueText(issueCode),
       trackingToken,
     };

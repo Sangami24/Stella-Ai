@@ -70,6 +70,12 @@ class TwilioCallService {
     return 'vehicle problem';
   }
 
+  _getDriverAlertMessage(role, issue, eta) {
+    const simpleIssue = this._getSimpleIssue(issue);
+    const article = /^[aeiou]/i.test(simpleIssue) ? 'an' : 'a';
+    return `Stella AI. Your car has ${article} ${simpleIssue}. A ${role} is on the way. ETA: ${eta}. The problem with your car has been shared on WhatsApp, along with the tracking link. Please stay safe.`;
+  }
+
   getConfigurationStatus() {
     const webhookUrl = publicWebhookUrl(this.webhookBaseUrl);
     return {
@@ -660,6 +666,7 @@ class TwilioCallService {
 
     try {
       const rootCause = diagnosis?.rootCause || 'system failure';
+      this._addTranscriptOnce('driver-alert', 'AI', this._getDriverAlertMessage(role, rootCause, eta || '15 min'));
       const call = await this.client.calls.create({
         url: `${this.webhookBaseUrl}/twilio/driver-voice?role=${encodeURIComponent(role)}&issue=${encodeURIComponent(rootCause)}&eta=${encodeURIComponent(eta || '15 min')}`,
         to: this.driverNumber,
@@ -683,9 +690,9 @@ class TwilioCallService {
     const VoiceResponse = twilio.twiml.VoiceResponse;
     const response = new VoiceResponse();
 
-    const message = `Stella AI. Your car has a ${this._getSimpleIssue(issue)}. A ${role} is on the way. ETA: ${eta}. The problem with your car has been shared on WhatsApp, along with the tracking link. Please stay safe.`;
+    const message = this._getDriverAlertMessage(role, issue, eta);
 
-    this.incidentManager.addTranscriptLine('AI', message);
+    this._addTranscriptOnce('driver-alert', 'AI', message);
     response.say({ voice: this.voice, language: this.voiceLanguage }, message);
     response.hangup();
 
@@ -723,9 +730,7 @@ class TwilioCallService {
     this.incidentManager.setCallStatus('connected');
 
     const rootCause = diagnosis?.rootCause || 'system failure';
-    this.incidentManager.addTranscriptLine('AI',
-      `Stella AI. Your car has a ${this._getSimpleIssue(rootCause)}. A ${role} is on the way. ETA: ${eta || '15 min'}. The problem with your car and live tracking are on WhatsApp.`
-    );
+    this._addTranscriptOnce('driver-alert', 'AI', this._getDriverAlertMessage(role, rootCause, eta || '15 min'));
     await this._delay(4000);
     if (!this._isCurrentSimulatedFlow(flowGeneration)) return;
 
