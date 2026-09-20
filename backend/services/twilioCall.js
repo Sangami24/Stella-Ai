@@ -214,31 +214,13 @@ class TwilioCallService {
     this.incidentManager.addTranscriptLine('AI', aiResponse);
     this.conversation.push({ speaker: 'Stella AI', text: aiResponse });
 
-    const lower = speechResult.toLowerCase();
-    // Only end a general conversation for an explicit operational instruction.
-    // Mentioning a mechanic/tow truck in a question must not trigger dispatch.
-    const isTow = /\b(?:dispatch|send|arrange|call|get)\s+(?:a\s+|the\s+)?(?:tow(?:ing)?\s*truck|tow truck)\b/.test(lower)
-      || /\btow\s+(?:it|the vehicle|the car)\b/.test(lower);
-    const isMechanic = /\b(?:dispatch|send|arrange|call|get)\s+(?:a\s+|the\s+)?(?:mobile\s+|certified\s+)?mechanic\b/.test(lower)
-      || /\bsend\s+someone\b/.test(lower);
-    const isAutoFix = /\b(?:start|perform|initiate|proceed with)\b.*\b(?:auto(?:mated)?|remote)\s+fix\b/.test(lower);
-    const isConfirmTow = (lower.includes('yes') || lower.includes('go ahead') || lower.includes('do it') || lower.includes('proceed') || lower.includes('okay') || lower.includes('sure') || lower.includes('alright'))
-      && aiResponse.toLowerCase().includes('tow');
-    const isConfirmMechanic = (lower.includes('yes') || lower.includes('go ahead') || lower.includes('do it') || lower.includes('proceed') || lower.includes('okay') || lower.includes('sure') || lower.includes('alright'))
-      && aiResponse.toLowerCase().includes('mechanic');
+    const decision = this._detectEngineerDecision(speechResult, aiResponse);
 
-    if (isTow || isConfirmTow || isMechanic || isConfirmMechanic || isAutoFix) {
+    if (decision) {
       response.say({ voice: 'alice', language: 'en-US' }, aiResponse);
       response.hangup();
 
-      // Determine engineer's decision
-      if (isTow || isConfirmTow) {
-        this.engineerDecision = 'tow truck';
-      } else if (isMechanic || isConfirmMechanic) {
-        this.engineerDecision = 'mechanic';
-      } else if (isAutoFix) {
-        this.engineerDecision = 'auto-fix';
-      }
+      this.engineerDecision = decision;
 
       this._log('call', `✅ Engineer decision: ${this.engineerDecision}`);
       this.incidentManager.setPendingResolution({ action: this.engineerDecision === 'tow truck' ? 'dispatch-tow' : this.engineerDecision === 'mechanic' ? 'escalate' : 'auto-fix', source: 'call' });
@@ -254,6 +236,26 @@ class TwilioCallService {
       gather.say({ voice: 'alice', language: 'en-US' }, 'Please continue.');
     }
     return response.toString();
+  }
+
+  _detectEngineerDecision(speechResult, aiResponse) {
+    const spoken = String(speechResult || '')
+      .toLowerCase()
+      .replace(/\b(?:auto|toe)\s+truck\b/g, 'tow truck');
+    const reply = String(aiResponse || '').toLowerCase();
+    const confirms = /\b(?:yes|go ahead|do it|proceed|okay|sure|alright)\b/.test(spoken);
+    const requestsTow = /\b(?:dispatch|send|arrange|call|get)\s+(?:a\s+|the\s+)?tow(?:ing)?\s*truck\b/.test(spoken)
+      || /\btow\s+(?:it|the vehicle|the car)\b/.test(spoken);
+    const requestsMechanic = /\b(?:dispatch|send|arrange|call|get)\s+(?:a\s+|the\s+)?(?:mobile\s+|certified\s+)?mechanic\b/.test(spoken)
+      || /\bsend\s+someone\b/.test(spoken);
+    const requestsAutoFix = /\b(?:start|perform|initiate|proceed with)\b.*\b(?:auto(?:mated)?|remote)\s+fix\b/.test(spoken);
+    const aiDispatchesTow = /\b(?:dispatching|sending|arranging|calling)\b[^.]{0,60}\btow(?:ing)?\s*truck\b/.test(reply);
+    const aiDispatchesMechanic = /\b(?:dispatching|sending|arranging|calling)\b[^.]{0,60}\bmechanic\b/.test(reply);
+
+    if (requestsTow || aiDispatchesTow || (confirms && reply.includes('tow'))) return 'tow truck';
+    if (requestsMechanic || aiDispatchesMechanic || (confirms && reply.includes('mechanic'))) return 'mechanic';
+    if (requestsAutoFix) return 'auto-fix';
+    return null;
   }
 
   handleEngineerCallStatus(status) {
