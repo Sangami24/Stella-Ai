@@ -423,7 +423,7 @@ class TwilioCallService {
       input: 'speech',
       action: `/twilio/mechanic-gather?role=${encodeURIComponent(role)}&issue=${encodeURIComponent(issue)}&attempt=${attempt}`,
       method: 'POST',
-      timeout: 8,
+      timeout: 5,
       speechTimeout: 'auto',
       language: this.voiceLanguage,
       actionOnEmptyResult: true
@@ -439,7 +439,7 @@ class TwilioCallService {
     const response = new VoiceResponse();
 
     if (!speechResult) {
-      response.say({ voice: this.voice, language: this.voiceLanguage }, 'I did not catch that. I will try another provider.');
+      response.say({ voice: this.voice, language: this.voiceLanguage }, 'No response received. Ending this call.');
       response.hangup();
       this.mechanicAvailable = false;
       return response.toString();
@@ -493,13 +493,13 @@ class TwilioCallService {
       // Unclear — ask again
       const { GeminiDiagnosis } = require('./geminiDiagnosis');
       const gemini = new GeminiDiagnosis();
-      const clarification = `I just need to know: are you available to come to the vehicle breakdown location right now? A simple yes or no will do.`;
+      const clarification = `I didn't hear that. Could you try again?`;
       this.incidentManager.addTranscriptLine('AI', clarification);
       const gather = response.gather({
         input: 'speech',
         action: `/twilio/mechanic-gather?role=${encodeURIComponent(role)}&issue=${encodeURIComponent(issue)}&attempt=${attempt}`,
         method: 'POST',
-        timeout: 8,
+        timeout: 5,
         speechTimeout: 'auto',
         language: this.voiceLanguage,
         actionOnEmptyResult: true
