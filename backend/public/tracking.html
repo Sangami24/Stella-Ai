@@ -320,6 +320,13 @@
       letter-spacing: 0.08em;
       white-space: nowrap;
     }
+    .marker-provider::before {
+      content: '\1F69A';
+      line-height: 1;
+    }
+    .marker-provider[data-role="mechanic"]::before {
+      content: '\1F527';
+    }
     @keyframes markerBounce {
       0%, 100% { transform: translateY(0); }
       50% { transform: translateY(-4px); }
@@ -477,7 +484,8 @@
           providerMarker = new maplibregl.Marker({ element: providerEl })
             .setLngLat([data.providerLocation.lon, data.providerLocation.lat])
             .addTo(map);
-          providerEl.innerHTML = data.role === 'tow truck' ? '&#128667;' : '&#128295;';
+          providerEl.textContent = '';
+          providerEl.dataset.role = data.role === 'tow truck' ? 'tow-truck' : 'mechanic';
           providerEl.dataset.label = data.role === 'tow truck' ? 'TOW TRUCK' : 'MECHANIC';
           providerEl.setAttribute('aria-label', data.role === 'tow truck' ? 'Tow truck en route' : 'Mechanic en route');
 
@@ -503,6 +511,31 @@
               'line-color': '#1677ff',
               'line-width': 5,
               'line-opacity': 0.9
+            }
+          });
+          map.addSource('provider-point', {
+            type: 'geojson',
+            data: providerPoint([data.providerLocation.lon, data.providerLocation.lat])
+          });
+          map.addLayer({
+            id: 'provider-halo',
+            type: 'circle',
+            source: 'provider-point',
+            paint: {
+              'circle-radius': 25,
+              'circle-color': '#1677ff',
+              'circle-opacity': 0.28
+            }
+          });
+          map.addLayer({
+            id: 'provider-dot',
+            type: 'circle',
+            source: 'provider-point',
+            paint: {
+              'circle-radius': 17,
+              'circle-color': '#1677ff',
+              'circle-stroke-width': 3,
+              'circle-stroke-color': '#ffffff'
             }
           });
           requestRoadRoute(data);
@@ -577,10 +610,24 @@
       const progress = Math.max(0, Math.min(1, Number(data.progress || 0) / 100));
       if (roadRouteCoordinates.length > 1) {
         const index = Math.min(roadRouteCoordinates.length - 1, Math.round((roadRouteCoordinates.length - 1) * progress));
-        providerMarker.setLngLat(roadRouteCoordinates[index]);
+        setProviderPoint(roadRouteCoordinates[index]);
         return;
       }
-      providerMarker.setLngLat([data.providerLocation.lon, data.providerLocation.lat]);
+      setProviderPoint([data.providerLocation.lon, data.providerLocation.lat]);
+    }
+
+    function setProviderPoint(coordinates) {
+      providerMarker.setLngLat(coordinates);
+      const source = map?.getSource('provider-point');
+      if (source) source.setData(providerPoint(coordinates));
+    }
+
+    function providerPoint(coordinates) {
+      return {
+        type: 'Feature',
+        properties: {},
+        geometry: { type: 'Point', coordinates }
+      };
     }
 
     function updateUI(data) {

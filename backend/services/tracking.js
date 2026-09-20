@@ -16,6 +16,7 @@ class TrackingService {
 
     const etaMinutes = parseInt(eta) || 12;
     const createdAt = Date.now();
+    const simulationDurationSeconds = Math.max(30, Number(process.env.TRACKING_DEMO_DURATION_SECONDS || 90));
     const session = {
       sessionId,
       role,
@@ -27,9 +28,10 @@ class TrackingService {
       providerPhone: process.env.TWILIO_MECHANIC_NUMBER || process.env.DEMO_CONTACT_NUMBER || '+919535728467',
       providerName: role === 'tow truck' ? 'RapidRescue Towing' : 'AutoCare Express',
       etaMinutes,
+      simulationDurationSeconds,
       etaRemainingSeconds: etaMinutes * 60,
       createdAt,
-      arrivalTime: createdAt + (etaMinutes * 60 * 1000),
+      arrivalTime: createdAt + (simulationDurationSeconds * 1000),
       rootCause: incident?.diagnosis?.rootCause || 'Vehicle breakdown',
     };
 
@@ -52,15 +54,14 @@ class TrackingService {
     if (!session) return null;
 
     const elapsed = Date.now() - session.createdAt;
-    const totalDuration = session.etaMinutes * 60 * 1000;
+    const totalDuration = session.simulationDurationSeconds * 1000;
     const progress = Math.min(elapsed / totalDuration, 1.0);
 
     // Interpolate position
     const lat = session.providerStart.lat + (session.driverLocation.lat - session.providerStart.lat) * progress;
     const lon = session.providerStart.lon + (session.driverLocation.lon - session.providerStart.lon) * progress;
 
-    const remainingMs = Math.max(0, session.arrivalTime - Date.now());
-    const remainingSeconds = Math.ceil(remainingMs / 1000);
+    const remainingSeconds = Math.ceil(session.etaMinutes * 60 * (1 - progress));
 
     // Check arrival
     if (progress >= 1.0 && session.status === 'en-route') {
@@ -125,6 +126,7 @@ class TrackingService {
       providerPhone: session.providerPhone,
       providerName: session.providerName,
       etaMinutes: session.etaMinutes,
+      simulationDurationSeconds: session.simulationDurationSeconds,
       createdAt: session.createdAt,
       rootCause: session.rootCause,
       expiresAt: session.createdAt + (24 * 60 * 60 * 1000),
@@ -136,7 +138,7 @@ class TrackingService {
     if (!trackingToken) return null;
     try {
       const payload = JSON.parse(Buffer.from(String(trackingToken), 'base64url').toString('utf8'));
-      const required = ['sessionId', 'role', 'driverLocation', 'providerStart', 'vehicleNumber', 'providerPhone', 'providerName', 'etaMinutes', 'createdAt', 'rootCause', 'expiresAt'];
+      const required = ['sessionId', 'role', 'driverLocation', 'providerStart', 'vehicleNumber', 'providerPhone', 'providerName', 'etaMinutes', 'simulationDurationSeconds', 'createdAt', 'rootCause', 'expiresAt'];
       if (payload.v !== 1 || payload.sessionId !== sessionId || required.some((key) => payload[key] == null) || Date.now() > payload.expiresAt) return null;
 
       const session = {
@@ -150,9 +152,10 @@ class TrackingService {
         providerPhone: payload.providerPhone,
         providerName: payload.providerName,
         etaMinutes: Number(payload.etaMinutes),
+        simulationDurationSeconds: Number(payload.simulationDurationSeconds),
         etaRemainingSeconds: Number(payload.etaMinutes) * 60,
         createdAt: Number(payload.createdAt),
-        arrivalTime: Number(payload.createdAt) + (Number(payload.etaMinutes) * 60 * 1000),
+        arrivalTime: Number(payload.createdAt) + (Number(payload.simulationDurationSeconds) * 1000),
         rootCause: payload.rootCause,
         trackingToken: trackingToken,
       };
