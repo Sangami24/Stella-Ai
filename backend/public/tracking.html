@@ -303,7 +303,7 @@
       color: #fff;
       font-size: 28px;
       box-shadow: 0 0 0 6px rgba(22, 119, 255, 0.28), 0 8px 18px rgba(15, 23, 42, 0.65);
-      animation: markerBounce 2s ease-in-out infinite;
+      animation: markerPulse 2s ease-in-out infinite;
     }
     .marker-provider::after {
       content: attr(data-label);
@@ -323,9 +323,9 @@
     .marker-provider::before {
       content: none;
     }
-    @keyframes markerBounce {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-4px); }
+    @keyframes markerPulse {
+      0%, 100% { box-shadow: 0 0 0 6px rgba(22, 119, 255, 0.28), 0 8px 18px rgba(15, 23, 42, 0.65); }
+      50% { box-shadow: 0 0 0 12px rgba(22, 119, 255, 0.08), 0 8px 18px rgba(15, 23, 42, 0.65); }
     }
     .loading-screen {
       position: fixed;
