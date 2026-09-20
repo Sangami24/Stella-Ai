@@ -429,7 +429,7 @@ app.all('/twilio/mechanic-gather', async (req, res) => {
 app.all('/twilio/mechanic-status', (req, res) => {
   const status = req.body.CallStatus;
   addLog('call', `Mechanic/tow call status: ${status}`);
-  twilioService.handleMechanicCallStatus(status);
+  twilioService.handleMechanicCallStatus(status, req.query.attempt, req.body.CallSid);
   res.sendStatus(200);
 });
 

@@ -25,6 +25,9 @@ class TwilioCallService {
     this.callAttempt = 0;
     this.engineerTransitionQueued = false;
     this.mechanicTransitionQueued = false;
+    this.driverTransitionQueued = false;
+    this.activeMechanicAttempt = 0;
+    this.activeMechanicCallSid = null;
     this.driverCompleted = false;
     this.simulatedFlowActive = false;
     this.simulatedMechanicActive = false;
@@ -109,6 +112,9 @@ class TwilioCallService {
     this.callAttempt = 0;
     this.engineerTransitionQueued = false;
     this.mechanicTransitionQueued = false;
+    this.driverTransitionQueued = false;
+    this.activeMechanicAttempt = 0;
+    this.activeMechanicCallSid = null;
     this.driverCompleted = false;
     this.conversation = [];
     this.emittedTranscriptKeys.clear();
@@ -302,6 +308,10 @@ class TwilioCallService {
     await this.refreshWebhookBaseUrl();
 
     this.callAttempt++;
+    this.mechanicAvailable = false;
+    this.mechanicTransitionQueued = false;
+    this.activeMechanicAttempt = this.callAttempt;
+    this.activeMechanicCallSid = null;
     this.incidentManager.incrementCallAttempt();
     this.incidentManager.setCallPhase('mechanic');
     this.incidentManager.setCallRecipient(`Service Provider (${role}) — Attempt ${this.callAttempt}`);
@@ -316,9 +326,10 @@ class TwilioCallService {
         url: `${this.webhookBaseUrl}/twilio/mechanic-voice?role=${encodeURIComponent(role)}&issue=${encodeURIComponent(diagnosis?.rootCause || 'vehicle breakdown')}&attempt=${this.callAttempt}`,
         to: this.mechanicNumber,
         from: this.fromNumber,
-        statusCallback: `${this.webhookBaseUrl}/twilio/mechanic-status`,
+        statusCallback: `${this.webhookBaseUrl}/twilio/mechanic-status?attempt=${this.callAttempt}`,
         statusCallbackEvent: ['completed', 'busy', 'no-answer', 'failed']
       });
+      this.activeMechanicCallSid = call.sid;
       this._log('call', `📞 Mechanic call SID: ${call.sid}`);
       return call;
     } catch (err) {
@@ -335,6 +346,56 @@ class TwilioCallService {
         this._log('error', `Unable to start ${role} call: ${error.message}`);
       }
     }, 2000);
+  }
+
+  _recordProviderDispatch(role, eta) {
+    const incident = this.incidentManager.getIncident();
+    if (!incident) return;
+
+    if (this.trackingService && !incident.trackingSessionId) {
+      const session = this.trackingService.createSession(incident, role, eta);
+      const trackingUrl = `${this.webhookBaseUrl}/track/${session.sessionId}`;
+      this.incidentManager.setTrackingInfo(session.sessionId, trackingUrl);
+    }
+
+    const serviceProvider = {
+      id: this.callAttempt,
+      name: role === 'tow truck' ? 'RapidRescue Towing Services' : 'AutoCare Express — Downtown',
+      rating: 4.8,
+      distance: role === 'tow truck' ? '3.1 km' : '2.3 km',
+      specialty: role === 'tow truck' ? 'Heavy Duty & Flatbed Towing' : 'Engine & Transmission',
+      phone: this.mechanicNumber,
+      eta,
+      address: role === 'tow truck' ? '200 Industrial Dr, Auburn Hills, MI' : '142 Main Street, Auburn Hills, MI',
+    };
+    this.incidentManager.setMechanics([serviceProvider]);
+    this.io.emit('mechanics', [serviceProvider]);
+    this.incidentManager.updateStatus('escalated');
+  }
+
+  _queueDriverCall(role, diagnosis, eta, delayMs = 2000) {
+    if (this.driverTransitionQueued || this.driverCompleted) return false;
+    this.driverTransitionQueued = true;
+    this.io.emit('call-waiting', { nextCall: 'driver', delayMs });
+    setTimeout(async () => {
+      try {
+        await this.initiateDriverCall(role, diagnosis, eta);
+      } catch (error) {
+        this._log('error', `Unable to start driver call: ${error.message}`);
+      }
+    }, delayMs);
+    return true;
+  }
+
+  _scheduleDriverFailSafe(role, diagnosis, eta, acceptedAttempt) {
+    setTimeout(() => {
+      const incident = this.incidentManager.getIncident();
+      const isSameProviderAttempt = Number(acceptedAttempt) === Number(this.activeMechanicAttempt);
+      if (incident?.callPhase !== 'mechanic' || !this.mechanicAvailable || !isSameProviderAttempt) return;
+      if (this.driverTransitionQueued || this.driverCompleted) return;
+      this._log('call', 'Provider accepted but no completion callback arrived. Starting the driver notification call.');
+      this._queueDriverCall(role, diagnosis, eta, 0);
+    }, 15000);
   }
 
   generateMechanicVoiceTwiML(role, issue, attempt) {
@@ -400,11 +461,11 @@ class TwilioCallService {
     } else if (isYes) {
       this.mechanicAvailable = true;
       const incident = this.incidentManager.getIncident();
+      const eta = role === 'tow truck' ? '15 min' : '12 min';
 
       // Generate tracking session
       let trackingUrl = '';
       if (this.trackingService && incident) {
-        const eta = role === 'tow truck' ? '15 min' : '12 min';
         const session = this.trackingService.createSession(incident, role, eta);
         trackingUrl = `${this.webhookBaseUrl}/track/${session.sessionId}`;
         this.incidentManager.setTrackingInfo(session.sessionId, trackingUrl);
@@ -424,6 +485,8 @@ class TwilioCallService {
 
       // Send WhatsApp with tracking link
       this._sendTrackingWhatsApp(role, mapsLink, vehicleNum);
+      this._recordProviderDispatch(role, eta);
+      this._scheduleDriverFailSafe(role, this.currentDiagnosis, eta, Number(attempt) || this.callAttempt);
 
     } else {
       // Unclear — ask again
@@ -447,9 +510,18 @@ class TwilioCallService {
     return response.toString();
   }
 
-  handleMechanicCallStatus(status) {
+  handleMechanicCallStatus(status, attempt = null, callSid = null) {
     // Ignore delayed provider callbacks once call 3 has started.
     if (this.incidentManager.getIncident()?.callPhase !== 'mechanic') return;
+    const receivedAttempt = Number(attempt);
+    if (receivedAttempt && receivedAttempt !== this.activeMechanicAttempt) {
+      this._log('call', `Ignoring delayed provider status for attempt ${receivedAttempt}.`);
+      return;
+    }
+    if (callSid && this.activeMechanicCallSid && callSid !== this.activeMechanicCallSid) {
+      this._log('call', 'Ignoring delayed provider status from a previous call.');
+      return;
+    }
     this.incidentManager.setCallStatus(status === 'answered' || status === 'in-progress' ? 'connected' : status);
     this._log('call', `📞 Mechanic/tow call status: ${status}`);
 
@@ -478,9 +550,7 @@ class TwilioCallService {
         this.incidentManager.setMechanics([towCompany]);
         this.io.emit('mechanics', [towCompany]);
 
-        setTimeout(() => {
-          this.initiateDriverCall(role, this.currentDiagnosis, eta);
-        }, 2000);
+        this._queueDriverCall(role, this.currentDiagnosis, eta);
 
       } else if (this.callAttempt < 3) {
         // Mechanic said no or didn't answer — retry
@@ -496,9 +566,7 @@ class TwilioCallService {
         this._log('call', `⚠️ Max retry attempts reached. Proceeding to driver call anyway...`);
         this.incidentManager.updateStatus('escalated');
         this.io.emit('call-waiting', { nextCall: 'driver', delayMs: 2000 });
-        setTimeout(() => {
-          this.initiateDriverCall(this.engineerDecision || 'mechanic', this.currentDiagnosis, '20 min');
-        }, 2000);
+        this._queueDriverCall(this.engineerDecision || 'mechanic', this.currentDiagnosis, '20 min');
       }
     }
   }
@@ -810,6 +878,7 @@ class TwilioCallService {
     this.simulatedFlowActive = true;
     this.engineerTransitionQueued = false;
     this.mechanicTransitionQueued = false;
+    this.driverTransitionQueued = false;
     this.driverCompleted = false;
     try {
     this.currentDiagnosis = diagnosis;
@@ -911,6 +980,7 @@ class TwilioCallService {
     this.simulatedMechanicActive = false;
     this.engineerTransitionQueued = false;
     this.mechanicTransitionQueued = false;
+    this.driverTransitionQueued = false;
     this.driverCompleted = false;
   }
 
