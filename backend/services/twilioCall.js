@@ -33,6 +33,8 @@ class TwilioCallService {
     this.simulatedMechanicActive = false;
     this.conversation = [];
     this.emittedTranscriptKeys = new Set();
+    this.voice = process.env.TWILIO_TTS_VOICE || 'Polly.Aditi';
+    this.voiceLanguage = process.env.TWILIO_TTS_LANGUAGE || 'en-IN';
     this.webhookBaseUrl = process.env.TWILIO_WEBHOOK_BASE_URL || process.env.RENDER_EXTERNAL_URL || 'http://localhost:3001';
     this.demoContactNumber = process.env.DEMO_CONTACT_NUMBER;
     this.toNumber = this.demoContactNumber || process.env.TWILIO_ENGINEER_NUMBER || process.env.TWILIO_TO_NUMBER || '+919535728467';
@@ -55,6 +57,16 @@ class TwilioCallService {
     const system = String(diagnosis.affectedSystem || 'vehicle system').replace(/\s*\/\s*/g, ' and ');
     const severity = Number(diagnosis.severity || 4);
     return `Hello, Stella AI here. Live TCU data flags a critical ${system} fault, severity ${severity} of 5. Mechanic or tow truck?`;
+  }
+
+  _getSimpleIssue(issue) {
+    const text = String(issue || '').toLowerCase();
+    if (text.includes('brake')) return 'brake problem';
+    if (text.includes('transmission') || text.includes('gear')) return 'transmission problem';
+    if (text.includes('coolant') || text.includes('overheat')) return 'engine cooling problem';
+    if (text.includes('electrical') || text.includes('battery') || text.includes('voltage')) return 'electrical problem';
+    if (text.includes('engine') || text.includes('oil')) return 'engine problem';
+    return 'vehicle problem';
   }
 
   getConfigurationStatus() {
@@ -160,7 +172,7 @@ class TwilioCallService {
     const message = this._getEngineerOpening(diagnosis);
 
     this._addTranscriptOnce('engineer-opening', 'AI', message);
-    response.say({ voice: 'alice', language: 'en-US' }, message);
+    response.say({ voice: this.voice, language: this.voiceLanguage }, message);
 
     const gather = response.gather({
       input: 'speech',
@@ -169,8 +181,8 @@ class TwilioCallService {
       speechTimeout: 'auto',
       language: 'en-IN'
     });
-    gather.say({ voice: 'alice', language: 'en-US' }, 'I\'m listening. Please go ahead.');
-    response.say({ voice: 'alice', language: 'en-US' }, 'I didn\'t catch that. Please let me know how you\'d like to proceed.');
+    gather.say({ voice: this.voice, language: this.voiceLanguage }, 'I am listening. Please go ahead.');
+    response.say({ voice: this.voice, language: this.voiceLanguage }, 'I did not catch that. Please tell me how you want to proceed.');
     response.redirect('/twilio/loop');
     return response.toString();
   }
@@ -185,7 +197,7 @@ class TwilioCallService {
       speechTimeout: 'auto',
       language: 'en-IN'
     });
-    gather.say({ voice: 'alice', language: 'en-US' }, 'Could you please repeat your diagnosis or decision?');
+    gather.say({ voice: this.voice, language: this.voiceLanguage }, 'Please repeat your question or decision.');
     response.redirect('/twilio/loop');
     return response.toString();
   }
@@ -195,7 +207,7 @@ class TwilioCallService {
     const response = new VoiceResponse();
 
     if (!speechResult) {
-      response.say({ voice: 'alice', language: 'en-US' }, 'I didn\'t catch that. Could you please repeat?');
+      response.say({ voice: this.voice, language: this.voiceLanguage }, 'I did not catch that. Please repeat.');
       response.redirect('/twilio/loop');
       return response.toString();
     }
@@ -217,7 +229,7 @@ class TwilioCallService {
     const decision = this._detectEngineerDecision(speechResult, aiResponse);
 
     if (decision) {
-      response.say({ voice: 'alice', language: 'en-US' }, aiResponse);
+      response.say({ voice: this.voice, language: this.voiceLanguage }, aiResponse);
       response.hangup();
 
       this.engineerDecision = decision;
@@ -225,7 +237,7 @@ class TwilioCallService {
       this._log('call', `✅ Engineer decision: ${this.engineerDecision}`);
       this.incidentManager.setPendingResolution({ action: this.engineerDecision === 'tow truck' ? 'dispatch-tow' : this.engineerDecision === 'mechanic' ? 'escalate' : 'auto-fix', source: 'call' });
     } else {
-      response.say({ voice: 'alice', language: 'en-US' }, aiResponse);
+      response.say({ voice: this.voice, language: this.voiceLanguage }, aiResponse);
       const gather = response.gather({
         input: 'speech',
         action: '/twilio/gather',
@@ -233,7 +245,7 @@ class TwilioCallService {
         speechTimeout: 'auto',
         language: 'en-IN'
       });
-      gather.say({ voice: 'alice', language: 'en-US' }, 'Please continue.');
+      gather.say({ voice: this.voice, language: this.voiceLanguage }, 'Please continue.');
     }
     return response.toString();
   }
@@ -404,30 +416,22 @@ class TwilioCallService {
     const VoiceResponse = twilio.twiml.VoiceResponse;
     const response = new VoiceResponse();
 
-    const vehicleNum = this.incidentManager.getIncident()?.trackingSessionId
-      ? `KA-01-AB-${Math.floor(1000 + Math.random() * 9000)}`
-      : 'KA-01-AB-1234';
-
-    const message = `Hello, this is Stella A.I. from the Stellantis emergency dispatch system. ` +
-      `We have a vehicle breakdown at MG Road, Bangalore. ` +
-      `The issue is: ${issue}. ` +
-      `We need a ${role} urgently. ` +
-      `Are you available? Can you head to the location now?`;
+    const message = `Stella AI. A vehicle in Bengaluru needs a ${role} for a ${this._getSimpleIssue(issue)}. Are you available?`;
 
     this.incidentManager.addTranscriptLine('AI', message);
-    response.say({ voice: 'alice', language: 'en-US' }, message);
+    response.say({ voice: this.voice, language: this.voiceLanguage }, message);
 
     const gather = response.gather({
       input: 'speech',
       action: `/twilio/mechanic-gather?role=${encodeURIComponent(role)}&issue=${encodeURIComponent(issue)}&attempt=${attempt}`,
       method: 'POST',
-      speechTimeout: 'auto',
+      speechTimeout: 1,
       language: 'en-IN'
     });
-    gather.say({ voice: 'alice', language: 'en-US' }, 'Please let me know if you can come.');
+    gather.say({ voice: this.voice, language: this.voiceLanguage }, 'Please say yes or no.');
 
     // Fallback if no response
-    response.say({ voice: 'alice', language: 'en-US' }, 'I did not receive a response. I will try another provider. Thank you.');
+    response.say({ voice: this.voice, language: this.voiceLanguage }, 'No response. I will try another provider.');
     response.hangup();
 
     return response.toString();
@@ -438,7 +442,7 @@ class TwilioCallService {
     const response = new VoiceResponse();
 
     if (!speechResult) {
-      response.say({ voice: 'alice', language: 'en-US' }, 'I didn\'t catch that. I will try another provider.');
+      response.say({ voice: this.voice, language: this.voiceLanguage }, 'I did not catch that. I will try another provider.');
       response.hangup();
       this.mechanicAvailable = false;
       return response.toString();
@@ -455,10 +459,10 @@ class TwilioCallService {
 
     if (isNo) {
       this.mechanicAvailable = false;
-      const msg = `Okay. I will contact the next available ${role}.`;
+      const msg = `Okay. I will call the next ${role}.`;
       this.incidentManager.addTranscriptLine('AI', msg);
       this.io.emit('provider-searching', { role, attempt: Number(attempt) || this.callAttempt || 1 });
-      response.say({ voice: 'alice', language: 'en-US' }, msg);
+      response.say({ voice: this.voice, language: this.voiceLanguage }, msg);
       response.hangup();
     } else if (isYes) {
       this.mechanicAvailable = true;
@@ -476,13 +480,10 @@ class TwilioCallService {
       const vehicleNum = incident?.tcuLogs?.[0]?.vehicleNumber || 'KA-01-AB-1234';
       const mapsLink = `https://www.google.com/maps?q=12.9716,77.5946`;
 
-      const confirmMsg = `Thank you for confirming. ` +
-        `The vehicle number is ${vehicleNum}. ` +
-        `I am sending you the exact Google Maps location via WhatsApp right now. ` +
-        `Please head there immediately. Thank you, goodbye.`;
+      const confirmMsg = `Thank you. I am sending the Google Maps location on WhatsApp now.`;
 
       this.incidentManager.addTranscriptLine('AI', confirmMsg);
-      response.say({ voice: 'alice', language: 'en-US' }, confirmMsg);
+      response.say({ voice: this.voice, language: this.voiceLanguage }, confirmMsg);
       response.hangup();
 
       // Send WhatsApp with tracking link
@@ -496,7 +497,7 @@ class TwilioCallService {
       const gemini = new GeminiDiagnosis();
       const clarification = `I just need to know: are you available to come to the vehicle breakdown location right now? A simple yes or no will do.`;
       this.incidentManager.addTranscriptLine('AI', clarification);
-      response.say({ voice: 'alice', language: 'en-US' }, clarification);
+      response.say({ voice: this.voice, language: this.voiceLanguage }, clarification);
       const gather = response.gather({
         input: 'speech',
         action: `/twilio/mechanic-gather?role=${encodeURIComponent(role)}&issue=${encodeURIComponent(issue)}&attempt=${attempt}`,
@@ -504,8 +505,8 @@ class TwilioCallService {
         speechTimeout: 'auto',
         language: 'en-IN'
       });
-      gather.say({ voice: 'alice', language: 'en-US' }, 'Yes or no, please.');
-      response.say({ voice: 'alice', language: 'en-US' }, 'No response received. Trying next provider.');
+      gather.say({ voice: this.voice, language: this.voiceLanguage }, 'Yes or no, please.');
+      response.say({ voice: this.voice, language: this.voiceLanguage }, 'No response. Trying next provider.');
       response.hangup();
     }
 
@@ -556,12 +557,12 @@ class TwilioCallService {
 
       } else if (this.callAttempt < 3) {
         // Mechanic said no or didn't answer — retry
-        this._log('call', `❌ ${this.engineerDecision || 'Service provider'} unavailable (attempt ${this.callAttempt}). Retrying in 2 seconds...`);
-        this.io.emit('call-waiting', { nextCall: `${this.engineerDecision || 'mechanic'} (retry)`, delayMs: 2000 });
+        this._log('call', `❌ ${this.engineerDecision || 'Service provider'} unavailable (attempt ${this.callAttempt}). Retrying now...`);
+        this.io.emit('call-waiting', { nextCall: `${this.engineerDecision || 'mechanic'} (retry)`, delayMs: 800 });
 
         setTimeout(() => {
           this.initiateMechanicCall(this.engineerDecision || 'mechanic', this.currentDiagnosis);
-        }, 2000);
+        }, 800);
 
       } else {
         // Max retries reached — still proceed to driver call
@@ -685,17 +686,10 @@ class TwilioCallService {
     const VoiceResponse = twilio.twiml.VoiceResponse;
     const response = new VoiceResponse();
 
-    const message = `Hello, this is Stella A.I. speaking. Please don't panic. ` +
-      `Your vehicle has experienced the following issue: ${issue}. ` +
-      `We have already spoken with our remote engineer and they have confirmed the diagnosis. ` +
-      `Based on their expert opinion, we are sending a ${role} to your location. ` +
-      `The estimated arrival time is ${eta}. ` +
-      `We are also sending you a WhatsApp message with a live tracking link where you can watch the ${role} coming to your location in real time. ` +
-      `Please stay with the vehicle and stay safe. If you need to call the ${role} directly, their number will be in the WhatsApp message. ` +
-      `Thank you for your patience. End of message.`;
+    const message = `Stella AI. Your car has a ${this._getSimpleIssue(issue)}. A ${role} is on the way. ETA: ${eta}. Check WhatsApp to track them. Please stay safe.`;
 
     this.incidentManager.addTranscriptLine('AI', message);
-    response.say({ voice: 'alice', language: 'en-US' }, message);
+    response.say({ voice: this.voice, language: this.voiceLanguage }, message);
     response.hangup();
 
     return response.toString();
