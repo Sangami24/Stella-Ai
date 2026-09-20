@@ -419,21 +419,17 @@ class TwilioCallService {
 
     const message = `Stella AI. A vehicle in Bengaluru needs a ${role} for a ${this._getSimpleIssue(issue)}. The driver is safely parked and the location is ready on WhatsApp. Are you available?`;
 
-    this.incidentManager.addTranscriptLine('AI', message);
-    response.say({ voice: this.voice, language: this.voiceLanguage }, message);
-
     const gather = response.gather({
       input: 'speech',
       action: `/twilio/mechanic-gather?role=${encodeURIComponent(role)}&issue=${encodeURIComponent(issue)}&attempt=${attempt}`,
       method: 'POST',
-      speechTimeout: 1,
-      language: 'en-IN'
+      timeout: 8,
+      speechTimeout: 'auto',
+      language: this.voiceLanguage,
+      actionOnEmptyResult: true
     });
-    gather.say({ voice: this.voice, language: this.voiceLanguage }, 'Please say yes or no.');
-
-    // Fallback if no response
-    response.say({ voice: this.voice, language: this.voiceLanguage }, 'No response. I will try another provider.');
-    response.hangup();
+    this.incidentManager.addTranscriptLine('AI', message);
+    gather.say({ voice: this.voice, language: this.voiceLanguage }, `${message} Please say yes if you are available, or no if you are not.`);
 
     return response.toString();
   }
@@ -456,7 +452,8 @@ class TwilioCallService {
       || lower.includes('busy') || lower.includes('not available') || lower.includes('sorry');
     const isYes = !isNo && (lower.includes('yes') || lower.includes('sure') || lower.includes('okay') || lower.includes('on my way')
       || lower.includes('coming') || /\bi can\b/.test(lower) || lower.includes('i will') || lower.includes('alright')
-      || lower.includes('go ahead') || lower.includes('heading'));
+      || lower.includes('go ahead') || lower.includes('heading') || lower.includes('available')
+      || lower.includes('affirmative') || lower.includes('absolutely') || lower.includes('can do'));
 
     if (isNo) {
       this.mechanicAvailable = false;
@@ -490,7 +487,7 @@ class TwilioCallService {
       // Send WhatsApp with tracking link
       this._sendTrackingWhatsApp(role, mapsLink, vehicleNum);
       this._recordProviderDispatch(role, eta);
-      this._scheduleDriverFailSafe(role, this.currentDiagnosis, eta, Number(attempt) || this.callAttempt);
+      this._queueDriverCall(role, this.currentDiagnosis, eta, 1500);
 
     } else {
       // Unclear — ask again
@@ -498,17 +495,16 @@ class TwilioCallService {
       const gemini = new GeminiDiagnosis();
       const clarification = `I just need to know: are you available to come to the vehicle breakdown location right now? A simple yes or no will do.`;
       this.incidentManager.addTranscriptLine('AI', clarification);
-      response.say({ voice: this.voice, language: this.voiceLanguage }, clarification);
       const gather = response.gather({
         input: 'speech',
         action: `/twilio/mechanic-gather?role=${encodeURIComponent(role)}&issue=${encodeURIComponent(issue)}&attempt=${attempt}`,
         method: 'POST',
+        timeout: 8,
         speechTimeout: 'auto',
-        language: 'en-IN'
+        language: this.voiceLanguage,
+        actionOnEmptyResult: true
       });
-      gather.say({ voice: this.voice, language: this.voiceLanguage }, 'Yes or no, please.');
-      response.say({ voice: this.voice, language: this.voiceLanguage }, 'No response. Trying next provider.');
-      response.hangup();
+      gather.say({ voice: this.voice, language: this.voiceLanguage }, `${clarification} Please say yes or no.`);
     }
 
     return response.toString();
