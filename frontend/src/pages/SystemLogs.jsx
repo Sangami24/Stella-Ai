@@ -1,5 +1,4 @@
 import React, { useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
 import { Terminal, AlertTriangle, Info, Zap, Radio, Trash2 } from 'lucide-react';
 import useStore from '../store/useStore';
 const categoryIcons = {
@@ -26,18 +25,24 @@ export default function SystemLogs() {
   const logs = useStore((s) => s.logs);
   const logsEndRef = useRef(null);
   const containerRef = useRef(null);
-  useEffect(() => {
-    if (containerRef.current) {
-      const { scrollTop, scrollHeight, clientHeight } = containerRef.current;
-      if (scrollHeight - scrollTop - clientHeight < 150) {
-        logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-      }
-    }
-  }, [logs]);
   const [filter, setFilter] = React.useState('all');
+  const [followTail, setFollowTail] = React.useState(true);
   const filteredLogs = filter === 'all'
     ? logs
     : logs.filter(l => l.category === filter);
+
+  useEffect(() => {
+    if (followTail && containerRef.current) {
+      containerRef.current.scrollTop = containerRef.current.scrollHeight;
+    }
+  }, [filteredLogs, followTail]);
+
+  const handleScroll = () => {
+    const container = containerRef.current;
+    if (!container) return;
+    const isAtBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 24;
+    setFollowTail((wasFollowing) => wasFollowing === isAtBottom ? wasFollowing : isAtBottom);
+  };
   const filters = ['all', 'telemetry', 'anomaly', 'ai', 'call', 'resolution', 'system'];
   return (
     <div className="glass-card p-6">
@@ -67,10 +72,14 @@ export default function SystemLogs() {
             {f.charAt(0).toUpperCase() + f.slice(1)}
           </button>
         ))}
+        <span className={`ml-auto self-center text-[10px] ${followTail ? 'text-emerald-300' : 'text-amber-300'}`}>
+          {followTail ? 'Following live logs' : 'Auto-scroll paused'}
+        </span>
       </div>
       {}
       <div
         ref={containerRef}
+        onScroll={handleScroll}
         className="terminal bg-[#080c14] rounded-lg p-4 h-[500px] overflow-y-auto border border-dash-border/30"
       >
         {filteredLogs.length === 0 ? (
@@ -78,15 +87,13 @@ export default function SystemLogs() {
             No logs yet. Start a simulation to see system activity...
           </div>
         ) : (
-          <AnimatePresence initial={false}>
+          <div>
             {filteredLogs.map((log, i) => {
               const Icon = categoryIcons[log.category] || Info;
               const color = categoryColors[log.category] || 'text-dash-muted';
               return (
-                <motion.div
+                <div
                   key={`${log.timestamp}-${i}`}
-                  initial={{ opacity: 0, height: 0 }}
-                  animate={{ opacity: 1, height: 'auto' }}
                   className="terminal-line flex items-start gap-2 py-1 hover:bg-white/[0.02] px-2 rounded group"
                 >
                   {}
@@ -116,10 +123,10 @@ export default function SystemLogs() {
                       </pre>
                     </details>
                   )}
-                </motion.div>
+                </div>
               );
             })}
-          </AnimatePresence>
+          </div>
         )}
         <div ref={logsEndRef} />
       </div>

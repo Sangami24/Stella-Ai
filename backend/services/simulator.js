@@ -15,7 +15,12 @@ class SimulatorService {
       throttle: 30,            
       tirePressure: 32,        
       brakeTemp: 150,          
+      brakePressure: 110,
+      absErrorCount: 0,
       fuelPressure: 45,        
+      transmissionTemp: 85,
+      transmissionPressure: 72,
+      gearSlip: 0,
       canErrorCount: 0,        
       gpsCoordinates: '12.9716, 77.5946'
     };
@@ -31,6 +36,10 @@ class SimulatorService {
         return this._electricalFault(base, tick, noise, timestamp);
       case 'coolant':
         return this._coolantFault(base, tick, noise, timestamp);
+      case 'transmission':
+        return this._transmissionFault(base, tick, noise, timestamp);
+      case 'brake':
+        return this._brakeFault(base, tick, noise, timestamp);
       default:
         return { ...base, timestamp };
     }
@@ -70,6 +79,30 @@ class SimulatorService {
       canErrorCount: Math.round(severity * 5)
     };
   }
+  _transmissionFault(base, tick, noise, timestamp) {
+    const severity = Math.min(tick / 8, 1);
+    return {
+      ...base,
+      timestamp,
+      transmissionTemp: Math.round((base.transmissionTemp + severity * 48 + noise() * 2) * 10) / 10,
+      transmissionPressure: Math.round((base.transmissionPressure - severity * 34 + noise() * 2) * 10) / 10,
+      gearSlip: Math.round((severity * 20 + Math.abs(noise()) * 2) * 10) / 10,
+      rpm: Math.round(base.rpm + severity * 650 + noise() * 80),
+      canErrorCount: Math.round(severity * 18)
+    };
+  }
+  _brakeFault(base, tick, noise, timestamp) {
+    const severity = Math.min(tick / 8, 1);
+    return {
+      ...base,
+      timestamp,
+      brakeTemp: Math.round(base.brakeTemp + severity * 310 + noise() * 8),
+      brakePressure: Math.round((base.brakePressure - severity * 60 + noise() * 3) * 10) / 10,
+      absErrorCount: Math.round(severity * 8),
+      speed: Math.max(0, Math.round(base.speed - severity * 35 + noise() * 3)),
+      canErrorCount: Math.round(severity * 12)
+    };
+  }
   generateNormalReading(recoveryTick) {
     const noise = () => (Math.random() - 0.5) * 1;
     const base = { ...this.baselineValues };
@@ -88,6 +121,15 @@ class SimulatorService {
       speed: Math.round(base.speed + noise() * 3),
       vibration: Math.round((base.vibration + noise() * 0.1) * 100) / 100,
       throttle: Math.round(base.throttle + noise() * 3),
+      tirePressure: Math.round((base.tirePressure + noise() * 0.3) * 10) / 10,
+      brakeTemp: Math.round(base.brakeTemp + noise() * 4),
+      brakePressure: Math.round((base.brakePressure + noise() * 2) * 10) / 10,
+      absErrorCount: 0,
+      fuelPressure: Math.round((base.fuelPressure + noise()) * 10) / 10,
+      transmissionTemp: Math.round((base.transmissionTemp + noise() * 2) * 10) / 10,
+      transmissionPressure: Math.round((base.transmissionPressure + noise()) * 10) / 10,
+      gearSlip: 0,
+      canErrorCount: 0,
     };
   }
 }

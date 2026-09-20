@@ -2,13 +2,17 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import {
   MapPin, Star, Clock, Phone, Wrench,
-  Navigation, CheckCircle, Car, AlertTriangle
+  Navigation, CheckCircle, Car, AlertTriangle,
+  ExternalLink, Map, MessageCircle
 } from 'lucide-react';
 import useStore from '../store/useStore';
+
 export default function MechanicView() {
   const mechanics = useStore((s) => s.mechanics);
   const incident = useStore((s) => s.incident);
   const diagnosis = useStore((s) => s.diagnosis);
+  const trackingUrl = useStore((s) => s.trackingUrl);
+
   if (!mechanics || mechanics.length === 0) {
     return (
       <div className="glass-card p-12 flex flex-col items-center justify-center text-center">
@@ -20,9 +24,12 @@ export default function MechanicView() {
       </div>
     );
   }
+
+  const dispatchedRole = mechanics[0]?.specialty?.includes('Towing') ? 'tow truck' : 'mechanic';
+
   return (
     <div className="space-y-6">
-      {}
+      {/* Status Header */}
       <motion.div
         initial={{ opacity: 0, y: -10 }}
         animate={{ opacity: 1, y: 0 }}
@@ -32,12 +39,12 @@ export default function MechanicView() {
           <div className="p-3 rounded-xl bg-yellow-500/10">
             <AlertTriangle className="w-6 h-6 text-yellow-400" />
           </div>
-          <div>
-            <h2 className={`font-display text-base tracking-wider ${incident?.pendingDriverCall?.role === 'tow truck' ? 'text-red-400' : 'text-green-400'} font-bold uppercase`}>
-              {incident?.pendingDriverCall?.role === 'tow truck' ? 'TOW TRUCK DISPATCHED' : 'MECHANIC DISPATCHED'}
+          <div className="flex-1">
+            <h2 className={`font-display text-base tracking-wider ${dispatchedRole === 'tow truck' ? 'text-red-400' : 'text-green-400'} font-bold uppercase`}>
+              {dispatchedRole === 'tow truck' ? 'TOW TRUCK DISPATCHED' : 'MECHANIC DISPATCHED'}
             </h2>
             <p className="text-sm text-dash-text mt-1">
-              Remote auto-fix is not possible for this issue. The nearest {incident?.pendingDriverCall?.role || 'service provider'} has been dispatched and is reaching your location soon.
+              Remote auto-fix is not possible for this issue. The nearest {dispatchedRole} has been dispatched and is reaching your location soon.
             </p>
             {diagnosis && (
               <div className="mt-4 space-y-2">
@@ -73,12 +80,71 @@ export default function MechanicView() {
           </div>
         </div>
       </motion.div>
-      {}
+
+      {/* Live Tracking Link Card */}
+      {trackingUrl && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="glass-card p-6 border border-indigo-500/30 bg-indigo-500/5"
+        >
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2 rounded-lg bg-indigo-500/10">
+              <Map className="w-5 h-5 text-indigo-400" />
+            </div>
+            <div>
+              <h3 className="font-display text-sm tracking-wider text-indigo-400 font-bold">
+                LIVE TRACKING ACTIVE
+              </h3>
+              <p className="text-xs text-dash-muted mt-0.5">
+                Driver can view the {dispatchedRole} approaching in real-time
+              </p>
+            </div>
+            <span className="ml-auto flex items-center gap-1.5 px-3 py-1 rounded-full bg-green-500/10 border border-green-500/30 text-green-400 text-xs font-semibold">
+              <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+              LIVE
+            </span>
+          </div>
+
+          <div className="bg-dash-bg/60 rounded-lg p-4 border border-dash-border/30 mb-4">
+            <div className="flex items-center gap-2 mb-2">
+              <ExternalLink className="w-3.5 h-3.5 text-dash-muted" />
+              <span className="text-[10px] text-dash-muted uppercase tracking-wider font-semibold">Tracking URL</span>
+            </div>
+            <a
+              href={trackingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-sm font-mono text-indigo-400 hover:text-indigo-300 transition-colors break-all underline underline-offset-2"
+            >
+              {trackingUrl}
+            </a>
+          </div>
+
+          <div className="flex gap-3">
+            <a
+              href={trackingUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-indigo-500/20 border border-indigo-500/30 text-indigo-400 text-sm font-semibold hover:bg-indigo-500/30 transition-colors"
+            >
+              <Map className="w-4 h-4" />
+              Open Live Map
+            </a>
+            <div className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-green-500/10 border border-green-500/20 text-green-400 text-sm font-semibold">
+              <MessageCircle className="w-4 h-4" />
+              WhatsApp Sent ✓
+            </div>
+          </div>
+        </motion.div>
+      )}
+
+      {/* Mechanic Cards */}
       <div className="glass-card p-6">
         <div className="flex items-center gap-3 mb-6">
           <MapPin className="w-5 h-5 text-dash-accent" />
           <h3 className="font-display text-sm tracking-wider text-dash-text font-semibold">
-            NEARBY CERTIFIED MECHANICS
+            DISPATCHED SERVICE PROVIDER
           </h3>
           <span className="ml-auto text-xs text-dash-muted">
             Sorted by distance
@@ -99,7 +165,7 @@ export default function MechanicView() {
             >
               {index === 0 && (
                 <div className="absolute -top-2 left-4 px-2 py-0.5 bg-green-500 text-white text-[10px] font-bold rounded uppercase tracking-wider">
-                  Nearest — Dispatched
+                  Dispatched — En Route
                 </div>
               )}
               <div className="flex items-start justify-between">
@@ -154,7 +220,7 @@ export default function MechanicView() {
                 {index === 0 && (
                   <span className="flex items-center gap-1 text-xs text-dash-muted ml-auto">
                     <Car className="w-3 h-3" />
-                    Mechanic has been notified of vehicle location
+                    {dispatchedRole === 'tow truck' ? 'Tow truck' : 'Mechanic'} notified via WhatsApp + Call
                   </span>
                 )}
               </div>
@@ -162,7 +228,8 @@ export default function MechanicView() {
           ))}
         </div>
       </div>
-      {}
+
+      {/* Driver Instructions */}
       <div className="glass-card p-6 border-l-4 border-dash-accent">
         <h3 className="font-display text-sm tracking-wider text-dash-accent font-semibold mb-3">
           DRIVER INSTRUCTIONS
@@ -178,11 +245,15 @@ export default function MechanicView() {
           </div>
           <div className="flex items-start gap-2">
             <span className="text-dash-accent font-bold">3.</span>
-            <p>The nearest certified mechanic ({mechanics[0]?.name}) has been dispatched and will arrive in approximately <strong className="text-green-400">{mechanics[0]?.eta}</strong>.</p>
+            <p>The nearest certified {dispatchedRole} ({mechanics[0]?.name}) has been dispatched and will arrive in approximately <strong className="text-green-400">{mechanics[0]?.eta}</strong>.</p>
           </div>
           <div className="flex items-start gap-2">
             <span className="text-dash-accent font-bold">4.</span>
-            <p>Stella AI will continue monitoring your vehicle until the mechanic arrives.</p>
+            <p>A WhatsApp message with a <strong className="text-indigo-400">live tracking link</strong> has been sent to you. You can watch the {dispatchedRole} approaching on the map.</p>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="text-dash-accent font-bold">5.</span>
+            <p>Stella AI will continue monitoring your vehicle until the {dispatchedRole} arrives.</p>
           </div>
         </div>
       </div>

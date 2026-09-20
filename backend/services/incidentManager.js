@@ -7,6 +7,7 @@ class IncidentManager {
   createIncident(faultTrigger) {
     this.incident = {
       id: uuidv4(),
+      sessionId: uuidv4().split('-')[0],
       faultTrigger, 
       status: 'detected',
       priority: 'high',
@@ -15,8 +16,14 @@ class IncidentManager {
       callStatus: null,
       callRecipient: null,
       activeCallRole: null, 
+      callPhase: null, // 'engineer' | 'mechanic' | 'driver'
+      callAttempt: 0,   // retry counter for mechanic/tow
+      maxCallAttempts: 3,
       pendingResolution: null, 
+      trackingSessionId: null,
+      trackingUrl: null,
       transcript: [],
+      tcuLogs: [],
       mechanics: null,
       resolution: null,
       timeline: [
@@ -65,6 +72,20 @@ class IncidentManager {
         event: 'in_call',
         label: 'Engineer Conversation',
         description: 'AI discussing diagnosis with engineer',
+        status: 'in_progress',
+        color: 'yellow'
+      },
+      'calling_mechanic': {
+        event: 'calling_mechanic',
+        label: 'Calling Service Provider',
+        description: `Calling mechanic/tow — attempt ${this.incident.callAttempt || 1}`,
+        status: 'in_progress',
+        color: 'yellow'
+      },
+      'calling_driver': {
+        event: 'calling_driver',
+        label: 'Calling Driver',
+        description: 'Notifying driver about rescue status...',
         status: 'in_progress',
         color: 'yellow'
       },
@@ -124,13 +145,22 @@ class IncidentManager {
   addTranscriptLine(speaker, text) {
     if (!this.incident) return;
     const line = {
+      id: uuidv4(),
       speaker,
       text,
+      role: this.incident.activeCallRole || 'engineer',
+      callPhase: this.incident.callPhase || 'engineer',
       timestamp: new Date().toISOString()
     };
     this.incident.transcript.push(line);
+    console.log(`[TRANSCRIPT] ${line.callPhase} | ${speaker}: ${text}`);
     this.io.emit('transcript', line);
     this.io.emit('incident', this.incident);
+  }
+  addTcuLog(logEntry) {
+    if (!this.incident) return;
+    this.incident.tcuLogs.push(logEntry);
+    this.io.emit('tcu-log', logEntry);
   }
   setCallStatus(status) {
     if (!this.incident) return;
@@ -146,6 +176,22 @@ class IncidentManager {
   setActiveCallRole(role) {
     if (!this.incident) return;
     this.incident.activeCallRole = role;
+  }
+  setCallPhase(phase) {
+    if (!this.incident) return;
+    this.incident.callPhase = phase;
+    this.io.emit('incident', this.incident);
+  }
+  incrementCallAttempt() {
+    if (!this.incident) return;
+    this.incident.callAttempt = (this.incident.callAttempt || 0) + 1;
+  }
+  setTrackingInfo(sessionId, url) {
+    if (!this.incident) return;
+    this.incident.trackingSessionId = sessionId;
+    this.incident.trackingUrl = url;
+    this.io.emit('incident', this.incident);
+    this.io.emit('tracking-url', url);
   }
   setPendingResolution(data) {
     if (!this.incident) return;

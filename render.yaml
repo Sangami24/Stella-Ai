@@ -1,0 +1,64 @@
+# Render Blueprint — Stella AI
+# Push to GitHub and connect to Render to auto-deploy
+
+services:
+  - type: web
+    name: stella-ai
+    runtime: node
+    plan: free
+    buildCommand: |
+      cd frontend && npm install && npm run build && cd ../backend && npm install
+    startCommand: cd backend && node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: RENDER
+        value: "true"
+      - key: GROQ_API_KEY
+        sync: false  # Set manually in Render dashboard
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-20b
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: DETERMINISTIC_DEMO
+        value: "false"
+      - key: RANDOM_DEMO_VEHICLE
+        value: "true"
+      - key: DEMO_CONTACT_NUMBER
+        sync: false
+      - key: VEHICLE_BRAND
+        sync: false
+      - key: VEHICLE_MODEL
+        sync: false
+      - key: VEHICLE_TRIM
+        sync: false
+      - key: VEHICLE_YEAR
+        sync: false
+      - key: VEHICLE_VIN
+        sync: false
+      - key: VEHICLE_REGISTRATION
+        sync: false
+      - key: VEHICLE_CURB_WEIGHT_KG
+        sync: false
+      - key: VEHICLE_LENGTH_MM
+        sync: false
+      - key: VEHICLE_WIDTH_MM
+        sync: false
+      - key: VEHICLE_HEIGHT_MM
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: TWILIO_ENGINEER_NUMBER
+        sync: false
+      - key: TWILIO_TO_NUMBER
+        sync: false
+      - key: TWILIO_MECHANIC_NUMBER
+        sync: false
+      - key: TWILIO_DRIVER_NUMBER
+        sync: false
+      - key: TWILIO_WEBHOOK_BASE_URL
+        sync: false  # Will be your Render URL: https://stella-ai.onrender.com

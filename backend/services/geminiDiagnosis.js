@@ -1,22 +1,60 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const Groq = require('groq-sdk');
+const { getVehicleProfile } = require('./vehicleProfile');
+const {
+  extractWeatherLocation,
+  formatWeatherReply,
+  getCurrentWeather,
+  isWeatherQuestion,
+} = require('./weatherService');
+
 class GeminiDiagnosis {
   constructor() {
-    this.apiKey = process.env.GEMINI_API_KEY;
-    this.model = null;
-    if (this.apiKey) {
-      const genAI = new GoogleGenerativeAI(this.apiKey);
-      this.model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    this.geminiApiKey = process.env.GEMINI_API_KEY;
+    this.groqApiKey = process.env.GROQ_API_KEY;
+    this.geminiModel = null;
+    this.groqClient = null;
+    this.forceDeterministicDemo = process.env.DETERMINISTIC_DEMO === 'true';
+    this.groqModel = process.env.GROQ_MODEL || 'openai/gpt-oss-20b';
+
+    if (this.groqApiKey) {
+      this.groqClient = new Groq({ apiKey: this.groqApiKey });
+    } else if (this.geminiApiKey) {
+      const genAI = new GoogleGenerativeAI(this.geminiApiKey);
+      this.geminiModel = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
     }
   }
+  _normaliseDiagnosis(diagnosis, mlPrediction = null) {
+    const primaryConfidence = Number(mlPrediction?.confidence ?? diagnosis.primaryConfidence ?? 0);
+    const contextualConfidence = Number(diagnosis.contextualConfidence ?? diagnosis.confidence ?? primaryConfidence);
+    return {
+      ...diagnosis,
+      primaryConfidence,
+      contextualConfidence,
+      confidence: contextualConfidence,
+      severity: Number(diagnosis.severity ?? mlPrediction?.severity ?? 1),
+      affectedParameters: diagnosis.affectedParameters || mlPrediction?.affectedParameters || [],
+    };
+  }
+  getStatus() {
+    if (this.forceDeterministicDemo) return { mode: 'deterministic', provider: 'Local telemetry demo', model: 'Rule-based fallback' };
+    if (this.groqClient) return { mode: 'live', provider: 'Groq', model: this.groqModel };
+    if (this.geminiModel) return { mode: 'live', provider: 'Google', model: 'Gemini 1.5 Flash' };
+    return { mode: 'unavailable', provider: 'None', model: 'Add GROQ_API_KEY or GEMINI_API_KEY' };
+  }
   async diagnoseFromTelemetry(telemetryHistory, faultType = null, mlPrediction = null) {
-    if (!this.model) {
+    // Live AI is the default whenever a provider key is configured.
+    if (this.forceDeterministicDemo || (!this.groqClient && !this.geminiModel)) {
       return this.getFallbackDiagnosis(telemetryHistory, faultType, mlPrediction);
     }
     const recentReadings = telemetryHistory.slice(-10);
+    const vehicleProfile = getVehicleProfile();
     const prompt = `You are an expert vehicle diagnostic AI for Stellantis STLA platform vehicles. You are acting as the Layer 2 Contextual AI Agent in an enterprise diagnostic pipeline.
 An Edge Analytics Engine (XGBoost) has already analyzed the telemetry and generated a PRIMARY prediction. Your job is to validate it, perform contextual reasoning, generate a customer-friendly explanation, determine if it can be fixed via remote OTA/ECU commands, and provide a SECONDARY confidence score.
-### Primary ML Prediction:
+### Primary telemetry-pattern prediction (generated from sensor readings, never from a UI fault button):
 ${JSON.stringify(mlPrediction, null, 2)}
+### Configured Vehicle Identity
+${JSON.stringify(vehicleProfile, null, 2)}
 ### Recent Telemetry Data (Last ${recentReadings.length} readings):
 ${JSON.stringify(recentReadings, null, 2)}
 Analyze the data and respond with ONLY a valid JSON object (no markdown, no code fences):
@@ -33,18 +71,32 @@ Analyze the data and respond with ONLY a valid JSON object (no markdown, no code
   "customerExplanation": "string - friendly explanation for the driver"
 }`;
     try {
-      const result = await this.model.generateContent(prompt);
-      let responseText = result.response.text().trim();
-      if (responseText.startsWith('```json')) {
-        responseText = responseText.replace(/```json/g, '').replace(/```/g, '').trim();
+      if (this.groqClient) {
+        const chatCompletion = await this.groqClient.chat.completions.create({
+          messages: [{ role: 'user', content: prompt }],
+          model: this.groqModel,
+          temperature: 0.2,
+          response_format: { type: 'json_object' }
+        });
+        const text = chatCompletion.choices[0].message.content.trim();
+        const diagnosis = this._normaliseDiagnosis(JSON.parse(text), mlPrediction);
+        this.lastDiagnosis = diagnosis;
+        return diagnosis;
+      } else {
+        const result = await this.geminiModel.generateContent(prompt);
+        let text = result.response.text().trim();
+        if (text.startsWith('```json')) text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        const diagnosis = this._normaliseDiagnosis(JSON.parse(text), mlPrediction);
+        this.lastDiagnosis = diagnosis;
+        return diagnosis;
       }
-      return JSON.parse(responseText);
-    } catch (e) {
+    } catch (err) {
+      console.error('❌ AI diagnoseFromTelemetry API error:', err.message);
       return this.getFallbackDiagnosis(telemetryHistory, faultType, mlPrediction);
     }
   }
   async extractResolutionIntent(transcript, diagnosis) {
-    if (!this.model) {
+    if (!this.groqClient && !this.geminiModel) {
       return {
         decision: diagnosis?.isAutoFixable ? 'auto-fix' : 'escalate',
         confidence: 85,
@@ -63,14 +115,23 @@ Based on the conversation, determine the resolution path. Respond with ONLY a va
   "reasoning": "string - why this decision was made"
 }`;
     try {
-      const result = await this.model.generateContent(prompt);
-      const text = result.response.text().trim();
-      let jsonStr = text;
-      if (text.includes('```')) {
-        jsonStr = text.replace(/```json?\n?/g, '').replace(/```/g, '').trim();
+      let jsonStr;
+      if (this.groqClient) {
+        const chatCompletion = await this.groqClient.chat.completions.create({
+          messages: [{ role: 'user', content: prompt }],
+          model: this.groqModel,
+          temperature: 0.2,
+          response_format: { type: 'json_object' }
+        });
+        jsonStr = chatCompletion.choices[0].message.content.trim();
+      } else {
+        const result = await this.geminiModel.generateContent(prompt);
+        const text = result.response.text().trim();
+        jsonStr = text.includes('```') ? text.replace(/```json?\n?/g, '').replace(/```/g, '').trim() : text;
       }
       return JSON.parse(jsonStr);
     } catch (err) {
+      console.error('❌ AI extractResolutionIntent API error:', err.message);
       return {
         decision: diagnosis?.isAutoFixable ? 'auto-fix' : 'escalate',
         confidence: 75,
@@ -78,39 +139,86 @@ Based on the conversation, determine the resolution path. Respond with ONLY a va
       };
     }
   }
-  async generateCallResponse(engineerMessage, diagnosis, telemetryHistory) {
+  async generateCallResponse(engineerMessage, diagnosis, telemetryHistory, conversation = []) {
     this.lastDiagnosis = diagnosis;
-    if (!this.model) {
-      return this._getFallbackCallResponse(engineerMessage);
+    this.lastTelemetry = telemetryHistory;
+
+    // Weather is live data, so do not let the language model guess it. This is
+    // available even when the configured AI provider is temporarily unavailable.
+    if (isWeatherQuestion(engineerMessage)) {
+      const location = extractWeatherLocation(engineerMessage);
+      if (!location) return 'Please tell me which city you want the weather for.';
+      try {
+        return formatWeatherReply(await getCurrentWeather(location));
+      } catch (err) {
+        console.error('Weather lookup failed:', err.message);
+        return 'I could not retrieve the current weather right now.';
+      }
     }
-    const prompt = `You are Stella AI, an advanced automotive diagnostic AI acting as a voice assistant dispatcher. 
-You are speaking on a phone call with a human automotive engineer.
-You just reported a vehicle anomaly to the engineer and asked them if they want to dispatch a mobile mechanic or dispatch a tow truck.
-Your goal is to converse naturally and concisely, acknowledging their diagnosis and confirming their choice of action.
+
+    if (this.forceDeterministicDemo || (!this.groqClient && !this.geminiModel)) {
+      return this._getFallbackCallResponse(engineerMessage, telemetryHistory);
+    }
+    const vehicleProfile = getVehicleProfile();
+    const prompt = `You are Stella A.I., a capable conversational AI assistant speaking on a live phone call with a human automotive engineer.
+Answer direct questions naturally, including general knowledge questions as a helpful ChatGPT-like assistant. Do not turn every question into a diagnostic summary or dispatch recommendation.
+
+GROUNDING RULES:
+- For vehicle identity, dimensions, weight, fault state, or TCU readings, use only the configured vehicle profile and live telemetry below. Never invent vehicle-specific facts.
+- For ordinary general knowledge, answer from your knowledge in a useful, accurate way.
+- A live weather lookup is handled by a dedicated tool before this prompt. Do not make up live conditions, current news, or other real-time facts you do not have.
+
 CONVERSATION RULES:
-1. Be extremely concise. Keep responses under 2 sentences. You are on a live phone call.
-2. If the engineer says to dispatch a mechanic, acknowledge the decision and say you will dispatch a certified mobile mechanic.
-3. If the engineer says to dispatch a tow truck, acknowledge the decision and say you will dispatch a tow truck and send them the vehicle's GPS location via WhatsApp.
-4. If they say to auto-fix, say you will proceed with the automated resolution.
+1. Keep phone answers concise: one or two short sentences, maximum 45 words.
+2. If the engineer says to dispatch a mechanic, reply only: "Understood. Dispatching the nearest certified mechanic."
+3. If the engineer says to dispatch a tow truck, reply only: "Understood. Dispatching a tow truck."
+4. If they say to auto-fix, reply only: "Understood. Starting the remote fix."
 5. Do not use markdown, emojis, or lists. Talk like a human on the phone.
-6. Acknowledge any diagnostic insights they provide.
+6. For a general question, answer the question directly without mentioning the car unless it is relevant.
+
+Conversation so far (avoid repeating information already provided unless asked):
+${conversation.slice(-6).map(turn => `${turn.speaker}: ${turn.text}`).join('\n') || 'This is the first engineer response.'}
+
+Configured vehicle profile:
+${JSON.stringify(vehicleProfile, null, 2)}
+
 Current diagnosis:
 ${JSON.stringify(diagnosis, null, 2)}
+
 Latest telemetry snapshot:
 ${JSON.stringify(telemetryHistory.slice(-3), null, 2)}
+
 The engineer just said: "${engineerMessage}"
-Respond naturally as if speaking on the phone. If they ask about the issue, explain using the diagnosis. If they approve a fix, confirm. If they want to escalate, acknowledge.`;
+Respond with only the direct answer. Do not add anything else.`;
     try {
-      const result = await this.model.generateContent(prompt);
-      return result.response.text().trim();
+      if (this.groqClient) {
+        const chatCompletion = await this.groqClient.chat.completions.create({
+          messages: [{ role: 'user', content: prompt }],
+          model: this.groqModel,
+          temperature: 0.7
+        });
+        return this._shortCallReply(chatCompletion.choices[0].message.content);
+      } else {
+        const result = await this.geminiModel.generateContent(prompt);
+        return this._shortCallReply(result.response.text());
+      }
     } catch (err) {
-      return this._getFallbackCallResponse(engineerMessage);
+      console.error('❌ AI generateCallResponse API error:', err.message);
+      return this._getFallbackCallResponse(engineerMessage, telemetryHistory);
     }
   }
+  _shortCallReply(reply) {
+    const oneLine = String(reply || '').replace(/\s+/g, ' ').trim();
+    const sentences = oneLine.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [oneLine];
+    const conciseReply = sentences.slice(0, 2).join(' ').trim();
+    if (conciseReply.length <= 340) return conciseReply;
+    return `${conciseReply.slice(0, 337).replace(/\s+\S*$/, '')}...`;
+  }
+
   getFallbackDiagnosis(telemetryHistory, faultType = null, mlPrediction = null) {
     const latest = telemetryHistory[telemetryHistory.length - 1];
     if (!latest) {
-      return {
+      return this._normaliseDiagnosis({
         rootCause: 'Insufficient telemetry data',
         affectedSystem: 'Unknown',
         severity: 1,
@@ -121,7 +229,7 @@ Respond naturally as if speaking on the phone. If they ask about the issue, expl
         recommendedAction: 'Continue monitoring',
         engineerExplanation: 'No data',
         customerExplanation: 'No data'
-      };
+      }, mlPrediction);
     }
     const diagnosisMap = {
       coolant: {
@@ -159,11 +267,36 @@ Respond naturally as if speaking on the phone. If they ask about the issue, expl
         recommendedAction: 'Reduce engine speed immediately. Enter limp mode. Do not continue driving, arrange tow to nearest certified service center.',
         engineerExplanation: 'RPM is oscillating wildly between extremes while oil pressure is critically low. Combined with elevated vibration levels, this pattern indicates a serious mechanical issue, potentially a failing oil pump.',
         customerExplanation: 'A critical engine fault has been detected. For your safety, the engine must be checked by a mechanic immediately.'
+      },
+      transmission: {
+        rootCause: 'Transmission fault. Gear slip and overheating indicate a hydraulic pressure or clutch-pack problem.',
+        affectedSystem: 'Transmission',
+        severity: 4,
+        primaryConfidence: mlPrediction?.confidence || 84,
+        contextualConfidence: 90,
+        riskAssessment: 'Continued driving can cause a complete loss of drive, transmission damage, or an unsafe shift event.',
+        isAutoFixable: false,
+        recommendedAction: 'Stop in a safe location and arrange a certified transmission inspection.',
+        engineerExplanation: 'Transmission temperature is rising while hydraulic pressure is falling and measured gear slip is increasing. The combined trend suggests clutch-pack wear or a pressure-control failure.',
+        customerExplanation: 'Your vehicle has a transmission problem. Please avoid driving until it has been inspected.',
+        affectedParameters: ['Transmission temperature', 'Gear slip', 'Transmission pressure']
+      },
+      brake: {
+        rootCause: 'Brake system fault. Brake temperature is excessive and hydraulic pressure is falling.',
+        affectedSystem: 'Braking System',
+        severity: 5,
+        primaryConfidence: mlPrediction?.confidence || 88,
+        contextualConfidence: 94,
+        riskAssessment: 'Brake fade or loss of braking force is possible. This is an immediate safety risk.',
+        isAutoFixable: false,
+        recommendedAction: 'Stop the vehicle safely and arrange emergency roadside assistance. Do not continue driving.',
+        engineerExplanation: 'The TCU reports a high brake-temperature trend with falling brake pressure and ABS errors, which can indicate fluid loss, a seized caliper, or a braking-system failure.',
+        customerExplanation: 'A critical brake-system problem has been detected. Please stop somewhere safe and do not continue driving.',
+        affectedParameters: ['Brake temperature', 'Brake pressure', 'ABS fault count']
       }
     };
     if (faultType && diagnosisMap[faultType]) {
-      const diag = diagnosisMap[faultType];
-      diag.primaryConfidence = mlPrediction?.confidence || diag.primaryConfidence;
+      const diag = this._normaliseDiagnosis(diagnosisMap[faultType], mlPrediction);
       this.lastDiagnosis = diag;
       return diag;
     }
@@ -177,9 +310,15 @@ Respond naturally as if speaking on the phone. If they ask about the issue, expl
     if (latest.rpm > 2000 || latest.oilPressure < 25 || latest.vibration > 2.0) {
       anomalies.engine = (latest.rpm - 800) / 4000 + (40 - latest.oilPressure) / 40 + (latest.vibration - 0.3) / 5;
     }
+    if (latest.transmissionTemp > 100 || latest.gearSlip > 6 || latest.transmissionPressure < 55) {
+      anomalies.transmission = (latest.transmissionTemp - 85) / 45 + (latest.gearSlip || 0) / 20 + (72 - latest.transmissionPressure) / 40;
+    }
+    if (latest.brakeTemp > 240 || latest.brakePressure < 75 || latest.absErrorCount > 0) {
+      anomalies.brake = (latest.brakeTemp - 150) / 300 + (110 - latest.brakePressure) / 70 + (latest.absErrorCount || 0) / 8;
+    }
     const topAnomaly = Object.entries(anomalies).sort((a, b) => b[1] - a[1])[0];
     if (!topAnomaly) {
-      const diag = {
+      const diag = this._normaliseDiagnosis({
         rootCause: 'Minor sensor fluctuations detected',
         affectedSystem: 'General',
         severity: 1,
@@ -190,17 +329,19 @@ Respond naturally as if speaking on the phone. If they ask about the issue, expl
         recommendedAction: 'Continue monitoring',
         engineerExplanation: 'Values are mostly normal.',
         customerExplanation: 'Everything is fine.'
-      };
+      }, mlPrediction);
       this.lastDiagnosis = diag;
       return diag;
     }
-    const diag = diagnosisMap[topAnomaly[0]] || diagnosisMap.engine;
+    const diag = this._normaliseDiagnosis(diagnosisMap[topAnomaly[0]] || diagnosisMap.engine, mlPrediction);
     this.lastDiagnosis = diag;
     return diag;
   }
-  _getFallbackCallResponse(engineerMessage) {
-    if (!engineerMessage) return "I'm detecting severe anomalies in the vehicle systems. Can you hear me? Please tell me what you'd like to know about the situation.";
+  _getFallbackCallResponse(engineerMessage, telemetryHistory = this.lastTelemetry || []) {
+    if (!engineerMessage) return 'Please state your question.';
     const lower = engineerMessage.toLowerCase();
+    const vehicle = getVehicleProfile();
+    const latest = telemetryHistory[telemetryHistory.length - 1] || {};
     const diag = this.lastDiagnosis || {};
     const rootCause = diag.rootCause || 'critical system anomaly';
     const severity = diag.severity || 4;
@@ -208,48 +349,54 @@ Respond naturally as if speaking on the phone. If they ask about the issue, expl
     const affectedSystem = diag.affectedSystem || 'Engine / Cooling';
     const riskAssessment = diag.riskAssessment || 'Immediate attention required to prevent further damage';
     if (lower.includes('mechanic') || lower.includes('send someone') || lower.includes('dispatch') && !lower.includes('tow')) {
-      return "Acknowledged. I will dispatch the nearest certified mobile mechanic to the vehicle location immediately and send them the GPS coordinates via WhatsApp. Thank you for your assessment, goodbye.";
+      return 'Understood. Dispatching the nearest certified mechanic.';
     }
     if (lower.includes('tow') || lower.includes('towing') || lower.includes('truck')) {
-      return "Acknowledged. I will dispatch a heavy-duty tow truck to the vehicle's current location and send the driver the GPS coordinates via WhatsApp. Thank you for your assessment, goodbye.";
+      return 'Understood. Dispatching a tow truck.';
     }
     if ((lower.includes('fix') && lower.includes('auto')) || lower.includes('remote fix') || lower.includes('proceed with')) {
-      return "Acknowledged. I will initiate the automated remote fix procedure now and monitor systems for recovery. Thank you, goodbye.";
+      return 'Understood. Starting the remote fix.';
     }
     if (lower.includes('temperature') || lower.includes('temp') || lower.includes('how hot') || lower.includes('coolant')) {
-      return `The engine coolant temperature is currently at 115 degrees Celsius, which is 25 degrees above the safe operating threshold of 90 degrees. The coolant flow rate has dropped to 2.1 liters per minute, down from the normal 8.5. This strongly suggests a coolant pump failure or a major leak. Based on this, do you recommend I dispatch a mechanic or a tow truck?`;
+      return latest.coolantTemp !== undefined ? `Coolant temperature is ${latest.coolantTemp} degrees Celsius.` : "I don't have a current coolant-temperature reading.";
     }
     if (lower.includes('oil') || lower.includes('pressure')) {
-      return `Oil pressure has dropped to 18 PSI from the normal baseline of 40 PSI. This is critically low and risks bearing damage or engine seizure if the vehicle continues running. The severity is ${severity} out of 5. Should I dispatch a mechanic or a tow truck?`;
+      return latest.oilPressure !== undefined ? `Oil pressure is ${latest.oilPressure} PSI.` : "I don't have a current oil-pressure reading.";
     }
     if (lower.includes('rpm') || lower.includes('engine speed') || lower.includes('vibration')) {
-      return `The engine RPM is fluctuating erratically between 400 and 3200, and vibration levels have spiked to 4.2 g compared to the normal 0.3 g. This pattern indicates possible internal mechanical failure. Would you like me to dispatch a mechanic or arrange for towing?`;
+      return latest.rpm !== undefined ? `The latest engine speed is ${latest.rpm} RPM and vibration is ${latest.vibration ?? 'unavailable'} g.` : "I don't have a current engine-speed reading.";
     }
     if (lower.includes('voltage') || lower.includes('battery') || lower.includes('electrical') || lower.includes('current')) {
-      return `The battery voltage has dropped to 10.8 volts from the normal 14.2 volts, and the current draw is spiking at 68 amps. Battery state of charge is at 32 percent and declining rapidly. This is consistent with an electrical short circuit. Should I dispatch a mechanic or a tow truck?`;
+      return latest.voltage !== undefined ? `Voltage is ${latest.voltage} volts and current draw is ${latest.current ?? 'unavailable'} amps.` : "I don't have a current electrical reading.";
     }
-    if (lower.includes('size') || lower.includes('model') || lower.includes('vehicle') || lower.includes('car') || lower.includes('type')) {
-      return `This is a Stellantis STLA Medium platform vehicle, plate number KA 01 AB 1234, with a 2.0 liter turbocharged inline-4 engine. The vehicle is currently located at GPS coordinates 12.9716 north, 77.5946 east, in Bangalore, India. The detected issue is: ${rootCause}. How would you like me to proceed?`;
+    if (lower.includes('weight') || lower.includes('heavy')) {
+      return vehicle.curbWeightKg === 'Not configured' ? 'The curb weight is not configured for this vehicle profile.' : `Configured curb weight is ${vehicle.curbWeightKg} kilograms.`;
+    }
+    if (lower.includes('size') || lower.includes('dimensions')) {
+      return vehicle.lengthMm === 'Not configured' ? 'Vehicle dimensions are not configured for this vehicle profile.' : `Length is ${vehicle.lengthMm} millimetres, width ${vehicle.widthMm} millimetres, and height ${vehicle.heightMm} millimetres.`;
+    }
+    if (lower.includes('brand') || lower.includes('model') || lower.includes('vehicle') || lower.includes('car') || lower.includes('type')) {
+      return `${vehicle.brand} ${vehicle.model}, ${vehicle.trim}, model year ${vehicle.modelYear}, registration ${vehicle.registration}.`;
     }
     if (lower.includes('severity') || lower.includes('how bad') || lower.includes('serious') || lower.includes('critical')) {
-      return `The severity is rated ${severity} out of 5, with ${confidence} percent confidence. Risk assessment: ${riskAssessment}. I strongly recommend immediate intervention. Should I dispatch a mechanic or a tow truck?`;
+      return `Severity is ${severity} of 5; confidence is ${confidence} percent.`;
     }
     if (lower.includes('detail') || lower.includes('explain') || lower.includes('tell me') || lower.includes('more info') || lower.includes('what happened') || lower.includes('what is') || lower.includes('what\'s')) {
-      return `Here is the full assessment. Root cause: ${rootCause}. Affected system: ${affectedSystem}. Severity: ${severity} out of 5, confidence: ${confidence} percent. Risk: ${riskAssessment}. The vehicle should not continue operating in this state. Would you like me to dispatch a mechanic or a tow truck?`;
+      return `Root cause: ${rootCause}`;
     }
     if (lower.includes('location') || lower.includes('where') || lower.includes('gps') || lower.includes('map')) {
-      return `The vehicle is located at GPS coordinates 12.9716 north, 77.5946 east, on MG Road in Bangalore, India. I can send this location via WhatsApp to the nearest service provider. Should I dispatch a mechanic or a tow truck?`;
+      return 'The vehicle is on MG Road, Bangalore.';
     }
     if (lower.includes('you solve') || lower.includes('yourself') || lower.includes('figure it out') || lower.includes('handle it') || lower.includes('you decide')) {
-      return `Based on my analysis, the ${rootCause.toLowerCase()} with severity ${severity} out of 5 requires physical intervention. I recommend dispatching a tow truck given the severity level. Should I proceed with a tow truck, or would you prefer a mobile mechanic instead?`;
+      return 'A tow truck is recommended.';
     }
     if (lower.includes('yes') || lower.includes('go ahead') || lower.includes('do it') || lower.includes('proceed') || lower.includes('okay') || lower.includes('sure') || lower.includes('alright')) {
-      return `Understood. I will proceed with dispatching a tow truck to the vehicle's location and send the GPS coordinates via WhatsApp to the service provider. Thank you for confirming, goodbye.`;
+      return 'Understood. Dispatching a tow truck.';
     }
     if (lower.includes('no') || lower.includes('wait') || lower.includes('hold on') || lower.includes('not yet')) {
-      return `Standing by. The vehicle systems are still showing critical readings. The ${affectedSystem.toLowerCase()} parameters remain outside safe operating range. What additional information do you need before making a decision?`;
+      return 'Understood. Standing by.';
     }
-    return `I understand. To summarize the situation: we are seeing ${rootCause.toLowerCase()}. Severity is ${severity} out of 5 with ${confidence} percent confidence. The ${affectedSystem.toLowerCase()} requires attention. Would you like me to dispatch a mechanic, or does this need a tow truck?`;
+    return "I don't have that information.";
   }
 }
 module.exports = { GeminiDiagnosis };

@@ -11,6 +11,12 @@ class AnomalyDetector {
       coolantPressure:  [10, 20, 5, 25],
       coolantFlowRate:  [5, 12, 3, 15],
       vibration:        [0, 1.5, 0, 3.0],
+      transmissionTemp: [60, 100, 40, 125],
+      transmissionPressure: [55, 90, 35, 110],
+      gearSlip:         [0, 5, 0, 15],
+      brakeTemp:        [80, 240, 40, 400],
+      brakePressure:    [75, 140, 45, 180],
+      absErrorCount:    [0, 0, 0, 5],
     };
     this.units = {
       rpm: 'RPM',
@@ -23,6 +29,12 @@ class AnomalyDetector {
       coolantPressure: 'psi',
       coolantFlowRate: 'L/min',
       vibration: 'g',
+      transmissionTemp: '°C',
+      transmissionPressure: 'psi',
+      gearSlip: '%',
+      brakeTemp: '°C',
+      brakePressure: 'bar',
+      absErrorCount: 'events',
     };
   }
   detect(reading) {

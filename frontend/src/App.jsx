@@ -1,9 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   Gauge, Activity, Phone, MapPin, Terminal,
-  Shield, AlertTriangle, Zap
+  Shield, AlertTriangle, Zap, Radio
 } from 'lucide-react';
 import useStore from './store/useStore';
 import Dashboard from './pages/Dashboard';
@@ -11,19 +11,35 @@ import Timeline from './pages/Timeline';
 import VoicePanel from './pages/VoicePanel';
 import MechanicView from './pages/MechanicView';
 import SystemLogs from './pages/SystemLogs';
-const SOCKET_URL = 'http://localhost:3001';
+import TcuLog from './pages/TcuLog';
+import TcuUploadModal from './components/TcuUploadModal';
+import WhatsAppDispatchToast from './components/WhatsAppDispatchToast';
+import CallFlowNotice from './components/CallFlowNotice';
+import { inferVehicleSystem } from './components/VehicleSystemMap';
+
+const SOCKET_URL = import.meta.env.DEV ? 'http://localhost:3001' : window.location.origin;
 const tabs = [
   { id: 'dashboard', label: 'Dashboard', icon: Gauge },
+  { id: 'tcu', label: 'TCU Log', icon: Radio },
   { id: 'timeline', label: 'Timeline', icon: Activity },
   { id: 'voice', label: 'Voice Panel', icon: Phone },
   { id: 'mechanics', label: 'Mechanics', icon: MapPin },
   { id: 'logs', label: 'System Logs', icon: Terminal },
 ];
+
 function App() {
   const activeTab = useStore((s) => s.activeTab);
   const setActiveTab = useStore((s) => s.setActiveTab);
   const healthScore = useStore((s) => s.healthScore);
   const incident = useStore((s) => s.incident);
+  const telemetry = useStore((s) => s.telemetry);
+  const diagnosis = useStore((s) => s.diagnosis);
+  const tcuLogs = useStore((s) => s.tcuLogs);
+  const tcuUploadNotice = useStore((s) => s.tcuUploadNotice);
+  const highlightedSystem = inferVehicleSystem(diagnosis, telemetry);
+  const visualHandoffIncidentRef = useRef(null);
+  const tcuUploadIncidentRef = useRef(null);
+
   useEffect(() => {
     const socket = io(SOCKET_URL, {
       transports: ['websocket', 'polling'],
@@ -68,6 +84,41 @@ function App() {
     socket.on('logs-history', (logs) => {
       if (logs) useStore.getState().setLogsHistory(logs);
     });
+    // TCU Log events
+    socket.on('tcu-log', (log) => {
+      useStore.getState().addTcuLog(log);
+    });
+    socket.on('tcu-history', (logs) => {
+      useStore.getState().setTcuLogsHistory(logs || []);
+    });
+    socket.on('vehicle-profile', (profile) => {
+      useStore.getState().setVehicleProfile(profile);
+    });
+    socket.on('ai-status', (status) => {
+      useStore.getState().setAiStatus(status);
+    });
+    // Tracking URL
+    socket.on('tracking-url', (url) => {
+      useStore.getState().setTrackingUrl(url);
+    });
+    socket.on('whatsapp-message', (message) => {
+      useStore.getState().setWhatsAppNotice(message);
+    });
+    socket.on('provider-searching', (data) => {
+      useStore.getState().setCallFlowNotice({ type: 'provider-searching', ...data });
+      useStore.getState().setActiveTab('voice');
+    });
+    socket.on('driver-helped', (data) => {
+      useStore.getState().setCallFlowNotice({ type: 'driver-helped', ...data });
+    });
+    // Call waiting indicator
+    socket.on('call-waiting', (data) => {
+      useStore.getState().setCallWaiting(data);
+      // Clear after the delay
+      setTimeout(() => {
+        useStore.getState().setCallWaiting(null);
+      }, data.delayMs + 500);
+    });
     socket.on('resolution-decision', async (data) => {
       await useStore.getState().triggerResolve(data.action);
       if (data.action === 'escalate' || data.action === 'dispatch-tow') {
@@ -85,22 +136,61 @@ function App() {
         transcript: [],
         mechanics: [],
         logs: [],
+        tcuLogs: [],
+        trackingUrl: null,
+        callWaiting: null,
+        decisionNotice: null,
+        tcuUploadNotice: null,
+        whatsappNotice: null,
+        callFlowNotice: null,
         activeFault: null,
         isSimulating: false,
         isDemoRunning: false,
       });
     });
-    return () => socket.disconnect();
+    return () => {
+      socket.disconnect();
+    };
   }, []);
+
   useEffect(() => {
     if (!incident) return;
     const status = incident.status;
-    if (status === 'calling' || status === 'in_call') {
+    if (status === 'calling' || status === 'in_call' || status === 'calling_mechanic' || status === 'calling_driver') {
       setActiveTab('voice');
     } else if (status === 'escalated') {
       setActiveTab('mechanics');
     }
   }, [incident?.status]);
+
+  useEffect(() => {
+    const isPreCallStage = ['detected', 'diagnosing', 'diagnosed'].includes(incident?.status);
+    if (!incident) {
+      visualHandoffIncidentRef.current = null;
+      tcuUploadIncidentRef.current = null;
+      return undefined;
+    }
+    if (!highlightedSystem || !isPreCallStage || visualHandoffIncidentRef.current === incident.id) return undefined;
+
+    // The fault must be visible on the car before the UI leaves the dashboard.
+    visualHandoffIncidentRef.current = incident.id;
+    setActiveTab('dashboard');
+    const tcuTimer = setTimeout(() => {
+      const latestIncident = useStore.getState().incident;
+      if (latestIncident && ['detected', 'diagnosing', 'diagnosed'].includes(latestIncident.status)) {
+        useStore.getState().setActiveTab('tcu');
+      }
+    }, 1500);
+    return () => clearTimeout(tcuTimer);
+  }, [incident?.id, incident?.status, highlightedSystem, setActiveTab]);
+
+  useEffect(() => {
+    const isPreCallStage = ['detected', 'diagnosing', 'diagnosed'].includes(incident?.status);
+    if (!incident || activeTab !== 'tcu' || !isPreCallStage || tcuLogs.length === 0 || tcuUploadNotice || tcuUploadIncidentRef.current === incident.id) return;
+    tcuUploadIncidentRef.current = incident.id;
+    useStore.getState().setTcuUploadNotice({ id: `tcu-sync-${incident.id}` });
+  }, [activeTab, incident?.id, incident?.status, tcuLogs.length, tcuUploadNotice]);
+
   const getStatusColor = () => {
     if (!incident) return 'text-dash-success';
     const status = incident.status;
@@ -109,23 +199,28 @@ function App() {
     if (['detected', 'diagnosing'].includes(status)) return 'text-dash-danger';
     return 'text-dash-warning';
   };
+
   const getStatusText = () => {
-    if (!incident) return 'ALL SYSTEMS NOMINAL';
+    if (!incident) return 'ALL SYSTEMS NORMAL';
     const map = {
       detected: 'FAULT DETECTED',
       diagnosing: 'AI DIAGNOSING',
       diagnosed: 'DIAGNOSIS COMPLETE',
       calling: 'CALLING ENGINEER',
       in_call: 'ENGINEER ON CALL',
+      calling_mechanic: 'CALLING SERVICE PROVIDER',
+      calling_driver: 'CALLING DRIVER',
       resolving: 'AUTO-RESOLVING',
       resolved: 'INCIDENT RESOLVED',
       escalated: 'MECHANIC DISPATCHED',
     };
     return map[incident.status] || incident.status.toUpperCase();
   };
+
   const renderPage = () => {
     switch (activeTab) {
       case 'dashboard': return <Dashboard />;
+      case 'tcu': return <TcuLog />;
       case 'timeline': return <Timeline />;
       case 'voice': return <VoicePanel />;
       case 'mechanics': return <MechanicView />;
@@ -133,6 +228,7 @@ function App() {
       default: return <Dashboard />;
     }
   };
+
   return (
     <div className="min-h-screen bg-dash-bg bg-grid">
       {}
@@ -195,8 +291,9 @@ function App() {
             const Icon = tab.icon;
             const isActive = activeTab === tab.id;
             const hasNotification =
-              (tab.id === 'voice' && (incident?.status === 'calling' || incident?.status === 'in_call')) ||
+              (tab.id === 'voice' && (incident?.status === 'calling' || incident?.status === 'in_call' || incident?.status === 'calling_mechanic' || incident?.status === 'calling_driver')) ||
               (tab.id === 'mechanics' && incident?.status === 'escalated') ||
+              (tab.id === 'tcu' && incident && !['resolved', 'escalated'].includes(incident.status)) ||
               (tab.id === 'timeline' && incident && incident.status !== 'resolved');
             return (
               <button
@@ -232,6 +329,9 @@ function App() {
           </motion.div>
         </AnimatePresence>
       </main>
+      <TcuUploadModal />
+      <WhatsAppDispatchToast />
+      <CallFlowNotice />
     </div>
   );
 }

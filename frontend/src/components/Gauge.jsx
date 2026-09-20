@@ -1,5 +1,4 @@
-import React, { useMemo } from 'react';
-import { motion } from 'framer-motion';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 export default function Gauge({
   value = 0,
   min = 0,
@@ -11,13 +10,16 @@ export default function Gauge({
   size = 160,
   reverse = false, 
 }) {
+  // Drive the number, arc, and needle from one smoothed value so they can
+  // never visually disagree while fresh telemetry arrives.
+  const displayedValue = useSmoothedValue(value);
   const radius = 58;
   const strokeWidth = 8;
   const center = 75;
-  const startAngle = 150;
-  const endAngle = 390;
+  const startAngle = 225;
+  const endAngle = 495;
   const totalAngle = endAngle - startAngle;
-  const clampedValue = Math.max(min, Math.min(max, value));
+  const clampedValue = Math.max(min, Math.min(max, displayedValue));
   const percentage = (clampedValue - min) / (max - min);
   const needleAngle = startAngle + percentage * totalAngle;
   const getColor = () => {
@@ -48,7 +50,7 @@ export default function Gauge({
   };
   const bgArc = describeArc(center, center, radius, startAngle, endAngle);
   const valueEnd = startAngle + percentage * totalAngle;
-  const valueArc = percentage > 0.01 ? describeArc(center, center, radius, startAngle, valueEnd) : '';
+  const valueArc = describeArc(center, center, radius, startAngle, Math.max(startAngle + 0.01, valueEnd));
   const needleEnd = polarToCartesian(center, center, radius - 15, needleAngle);
   const ticks = useMemo(() => {
     const count = 12;
@@ -78,19 +80,14 @@ export default function Gauge({
           strokeLinecap="round"
         />
         {}
-        {valueArc && (
-          <motion.path
-            d={valueArc}
-            fill="none"
-            stroke={color}
-            strokeWidth={strokeWidth}
-            strokeLinecap="round"
-            initial={{ pathLength: 0 }}
-            animate={{ pathLength: 1 }}
-            transition={{ duration: 0.8, ease: 'easeOut' }}
-            style={{ filter: status === 'danger' ? `drop-shadow(0 0 6px ${color})` : 'none' }}
-          />
-        )}
+        <path
+          d={valueArc}
+          fill="none"
+          stroke={color}
+          strokeWidth={strokeWidth}
+          strokeLinecap="round"
+          style={{ filter: status === 'danger' ? `drop-shadow(0 0 6px ${color})` : 'none' }}
+        />
         {}
         {ticks.map((tick, i) => (
           <line
@@ -104,7 +101,7 @@ export default function Gauge({
           />
         ))}
         {}
-        <motion.line
+        <line
           x1={center}
           y1={center}
           x2={needleEnd.x}
@@ -112,9 +109,6 @@ export default function Gauge({
           stroke={color}
           strokeWidth={2.5}
           strokeLinecap="round"
-          initial={false}
-          animate={{ x2: needleEnd.x, y2: needleEnd.y }}
-          transition={{ type: 'spring', stiffness: 80, damping: 15 }}
           style={{ filter: `drop-shadow(0 0 4px ${color})` }}
         />
         {}
@@ -131,7 +125,7 @@ export default function Gauge({
           fontWeight="700"
           fontFamily="Orbitron, sans-serif"
         >
-          {typeof value === 'number' ? (value % 1 === 0 ? value : value.toFixed(1)) : value}
+          {formatGaugeValue(displayedValue)}
         </text>
         {}
         <text
@@ -151,4 +145,32 @@ export default function Gauge({
       </span>
     </div>
   );
+}
+
+function useSmoothedValue(value) {
+  const [displayValue, setDisplayValue] = useState(() => Number(value) || 0);
+  const currentValue = useRef(displayValue);
+
+  useEffect(() => {
+    const target = Number(value) || 0;
+    const start = currentValue.current;
+    const startedAt = performance.now();
+    let frame;
+    const animate = (now) => {
+      const progress = Math.min((now - startedAt) / 720, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const nextValue = start + (target - start) * eased;
+      currentValue.current = nextValue;
+      setDisplayValue(nextValue);
+      if (progress < 1) frame = requestAnimationFrame(animate);
+    };
+    frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, [value]);
+
+  return displayValue;
+}
+
+function formatGaugeValue(value) {
+  return Math.abs(value % 1) < 0.05 ? Math.round(value) : value.toFixed(1);
 }
