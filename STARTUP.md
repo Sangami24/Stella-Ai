@@ -4,7 +4,7 @@ ngrok http 3001
 
 
 
-cd C:\Users\achal\Documents\Projects\CON1\backend
+cd backend
 npm run dev
 
 
@@ -12,5 +12,5 @@ npm run dev
 
 
 
-cd C:\Users\achal\Documents\Projects\CON1\frontend
+cd frontend
 npm run dev

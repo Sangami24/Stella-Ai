@@ -175,6 +175,8 @@ CONVERSATION RULES:
 4. If they say to auto-fix, reply only: "Understood. Starting the remote fix."
 5. Do not use markdown, emojis, or lists. Talk like a human on the phone.
 6. For a general question, answer the question directly without mentioning the car unless it is relevant.
+7. The opening already asked whether to dispatch a mechanic or tow truck. Never repeat that question or suggest a dispatch option after a normal question. Ask about dispatch only when the engineer explicitly asks for a recommendation or gives a dispatch instruction.
+8. End each normal answer after answering the question; do not add a follow-up question.
 
 Conversation so far (avoid repeating information already provided unless asked):
 ${conversation.slice(-6).map(turn => `${turn.speaker}: ${turn.text}`).join('\n') || 'This is the first engineer response.'}

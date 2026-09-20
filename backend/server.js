@@ -190,6 +190,17 @@ app.get('/ai/status', (req, res) => {
   res.json(gemini.getStatus());
 });
 
+// Safe pre-demo check: exposes only readiness, never phone numbers or keys.
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    version: 'demo-flow-2026-09-20',
+    ai: gemini.getStatus(),
+    calls: twilioService.getConfigurationStatus(),
+    activeScenario: activeScenario ? { id: activeScenario.id, type: activeScenario.type } : null,
+  });
+});
+
 // ═══════════════════════════════════════════════════════
 // SIMULATION ENDPOINTS
 // ═══════════════════════════════════════════════════════
@@ -245,10 +256,15 @@ function publishScenarioReading(scenario, tick) {
   io.emit('telemetry', reading);
 
   const anomalies = anomalyDetector.detect(reading);
-  const shouldPublishTcuPacket = tick % 10 === 0;
+  // A judge must see proof of the TCU → backend handoff as soon as a fault is
+  // selected. Publish the first abnormal packet immediately, then continue at
+  // the promised ten-second cadence.
+  const shouldPublishTcuPacket = tick === 6 || (tick - 6) % 10 === 0;
   if (shouldPublishTcuPacket) {
     addLog('telemetry', `Sensor reading #${tick}`, reading);
     generateTcuLog(reading, tick, anomalies);
+    const immediatePrediction = inferTelemetryPrediction(telemetryHistory.slice(-10));
+    io.emit('health-score', immediatePrediction.healthScore);
   }
   if (anomalies.length > 0) {
     io.emit('anomalies', anomalies);

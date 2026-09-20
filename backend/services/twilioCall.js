@@ -1,5 +1,17 @@
 const twilio = require('twilio');
 
+function publicWebhookUrl(value) {
+  try {
+    const url = new URL(String(value || ''));
+    const isPublic = url.protocol === 'https:'
+      && !['localhost', '127.0.0.1'].includes(url.hostname)
+      && !url.hostname.includes('your-ngrok-url');
+    return isPublic ? url.toString().replace(/\/$/, '') : null;
+  } catch {
+    return null;
+  }
+}
+
 class TwilioCallService {
   constructor(io, incidentManager, trackingService) {
     this.io = io;
@@ -35,6 +47,57 @@ class TwilioCallService {
     }
   }
 
+  _getEngineerOpening(diagnosis) {
+    if (!diagnosis) return 'Hello, Stella AI here. Live TCU data flags a vehicle fault. Mechanic or tow truck?';
+    const system = String(diagnosis.affectedSystem || 'vehicle system').replace(/\s*\/\s*/g, ' and ');
+    const severity = Number(diagnosis.severity || 4);
+    return `Hello, Stella AI here. Live TCU data flags a critical ${system} fault, severity ${severity} of 5. Mechanic or tow truck?`;
+  }
+
+  getConfigurationStatus() {
+    const webhookUrl = publicWebhookUrl(this.webhookBaseUrl);
+    return {
+      twilioConfigured: Boolean(this.client && this.fromNumber),
+      publicWebhookConfigured: Boolean(webhookUrl),
+      webhookHost: webhookUrl ? new URL(webhookUrl).host : null,
+      issue: !this.client || !this.fromNumber
+        ? 'Twilio credentials or caller number are missing.'
+        : !webhookUrl
+          ? 'A public HTTPS webhook is required. Start ngrok or use the Render URL.'
+          : null,
+    };
+  }
+
+  async refreshWebhookBaseUrl() {
+    if (process.env.RENDER_EXTERNAL_URL) {
+      this.webhookBaseUrl = process.env.RENDER_EXTERNAL_URL.replace(/\/$/, '');
+      return this.webhookBaseUrl;
+    }
+
+    try {
+      const response = await fetch('http://127.0.0.1:4040/api/tunnels', { signal: AbortSignal.timeout(1200) });
+      if (response.ok) {
+        const data = await response.json();
+        const tunnel = (data.tunnels || []).find((item) => publicWebhookUrl(item.public_url));
+        if (tunnel) {
+          this.webhookBaseUrl = publicWebhookUrl(tunnel.public_url);
+          process.env.TWILIO_WEBHOOK_BASE_URL = this.webhookBaseUrl;
+          this._log('system', `Using active ngrok webhook: ${new URL(this.webhookBaseUrl).host}`);
+          return this.webhookBaseUrl;
+        }
+      }
+    } catch {
+      // Fall through to a manually supplied public URL.
+    }
+
+    const configuredUrl = publicWebhookUrl(this.webhookBaseUrl);
+    if (configuredUrl) {
+      this.webhookBaseUrl = configuredUrl;
+      return configuredUrl;
+    }
+    throw new Error('Twilio needs a public HTTPS webhook. Start ngrok http 3001 or configure TWILIO_WEBHOOK_BASE_URL with your Render URL.');
+  }
+
   // ═══════════════════════════════════════════════════════
   // CALL 1: ENGINEER (Two-way conversation)
   // ═══════════════════════════════════════════════════════
@@ -53,6 +116,7 @@ class TwilioCallService {
     if (!this.client) {
       throw new Error('Twilio not configured');
     }
+    await this.refreshWebhookBaseUrl();
 
     this.incidentManager.setCallPhase('engineer');
     this.incidentManager.setCallRecipient('On-Call Engineer');
@@ -60,10 +124,9 @@ class TwilioCallService {
     this.incidentManager.setCallStatus('ringing');
     this.incidentManager.updateStatus('calling');
 
-    const opening = diagnosis
-      ? `Hello. This is Stella A.I. calling from the Stellantis diagnostic system. We have detected a critical issue: ${diagnosis.rootCause}. Severity level is ${diagnosis.severity} out of 5. Should we dispatch a mobile mechanic or a tow truck?`
-      : 'Hello. This is Stella A.I. calling about a vehicle anomaly. Should we dispatch a mechanic or tow truck?';
+    const opening = this._getEngineerOpening(diagnosis);
     this._addTranscriptOnce('engineer-opening', 'AI', opening);
+    this.conversation.push({ speaker: 'Stella AI', text: opening });
 
     this._log('call', '📞 [CALL 1/3] Initiating two-way call to On-Call Engineer...');
 
@@ -88,12 +151,7 @@ class TwilioCallService {
     const VoiceResponse = twilio.twiml.VoiceResponse;
     const response = new VoiceResponse();
 
-    const message = diagnosis
-      ? `Hello. This is Stella A.I. calling from the Stellantis diagnostic system. ` +
-        `We have detected a critical issue: ${diagnosis.rootCause}. ` +
-        `Severity level is ${diagnosis.severity} out of 5, with ${diagnosis.primaryConfidence || 85} percent confidence. ` +
-        `I need your expert opinion. Based on the readings, should we send a mobile mechanic to fix this on-site, or does the vehicle need to be towed to a service center?`
-      : `Hello, this is Stella A.I.. We have detected a vehicle anomaly requiring your attention. Please advise if we need a mechanic or a tow truck.`;
+    const message = this._getEngineerOpening(diagnosis);
 
     this._addTranscriptOnce('engineer-opening', 'AI', message);
     response.say({ voice: 'alice', language: 'en-US' }, message);
@@ -241,6 +299,7 @@ class TwilioCallService {
     if (!this.client) {
       return this._simulateMechanicFlow(role, diagnosis);
     }
+    await this.refreshWebhookBaseUrl();
 
     this.callAttempt++;
     this.incidentManager.incrementCallAttempt();
@@ -521,6 +580,7 @@ class TwilioCallService {
     if (!this.client) {
       return this._simulateDriverFlow(role, diagnosis, eta, flowGeneration);
     }
+    await this.refreshWebhookBaseUrl();
 
     this.incidentManager.setCallPhase('driver');
     this.incidentManager.setCallRecipient('Vehicle Driver');
@@ -768,9 +828,7 @@ class TwilioCallService {
 
     await this._delay(1000);
     if (!this._isCurrentSimulatedFlow(flowGeneration)) return;
-    this.incidentManager.addTranscriptLine('AI',
-      `Hello, this is Stella AI. We've detected a critical issue: ${diagnosis?.rootCause || 'system anomaly'}. Severity ${diagnosis?.severity || 4}/5. Should I dispatch a mechanic or a tow truck?`
-    );
+    this.incidentManager.addTranscriptLine('AI', this._getEngineerOpening(diagnosis));
     await this._delay(3000);
     if (!this._isCurrentSimulatedFlow(flowGeneration)) return;
     this.incidentManager.addTranscriptLine('Engineer', 'Can you tell me more about the affected parameters?');
